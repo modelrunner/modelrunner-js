@@ -1,0 +1,27 @@
+{
+  "compileOnSave": false,
+  "compilerOptions": {
+    "rootDir": ".",
+    "sourceMap": true,
+    "declaration": false,
+    "moduleResolution": "node",
+    "emitDecoratorMetadata": true,
+    "experimentalDecorators": true,
+    "importHelpers": true,
+    "target": "es2015",
+    "module": "esnext",
+    "lib": ["es2017", "dom"],
+    "skipLibCheck": true,
+    "skipDefaultLibCheck": true,
+    "baseUrl": ".",
+    "paths": {
+      "@modelrunner/client": ["libs/client/src/index.ts"],
+      "@modelrunner/endpoints": ["libs/client/src/types/endpoints.ts"],
+      "@modelrunner/create-app": ["libs/create-app/src/index.ts"],
+      "@modelrunner/server-proxy": ["libs/proxy/src/index.ts"],
+      "@modelrunner/server-proxy/express": ["libs/proxy/src/express.ts"],
+      "@modelrunner/server-proxy/nextjs": ["libs/proxy/src/nextjs.ts"]
+    }
+  },
+  "exclude": ["node_modules/**", "tmp/**", "dist/**"]
+}
