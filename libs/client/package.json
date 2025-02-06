@@ -1,5 +1,5 @@
 {
-  "name": "@modelrunner/client-alpha.0",
+  "name": "@modelrunner/client",
   "description": "The modelrunner.ai client for JavaScript and TypeScript",
   "version": "1.0.3-alpha.1",
   "license": "MIT",
