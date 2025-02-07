@@ -63,8 +63,7 @@ async function initiateUpload(
 
   return await dispatchRequest<InitiateUploadData, InitiateUploadResult>({
     method: "POST",
-    // NOTE: We want to test V3 without making it the default at the API level
-    targetUrl: `${getRestApiUrl()}/storage/upload/initiate?storage_type=modelrunner-cdn-v3`,
+    targetUrl: `${getRestApiUrl()}/storage/upload/initiate`,
     input: {
       content_type: contentType,
       file_name: filename,
