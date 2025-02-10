@@ -14,7 +14,7 @@ export async function getTemporaryAuthToken(
   const appId = parseEndpointId(app);
   const token: string | object = await dispatchRequest<any, string>({
     method: "POST",
-    targetUrl: `${getRestApiUrl()}/tokens/`,
+    targetUrl: `${getRestApiUrl()}/tokens`,
     config,
     input: {
       allowed_apps: [appId.alias],
