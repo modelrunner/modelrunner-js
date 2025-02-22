@@ -239,6 +239,7 @@ export const createQueueClient = ({
       const input = options.input
         ? await storage.transformInput(options.input)
         : undefined;
+
       return dispatchRequest<Input, InQueueQueueStatus>({
         method: options.method,
         targetUrl: buildUrl(endpointId, {

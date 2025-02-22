@@ -86,7 +86,7 @@ async function initiateMultipartUpload(
 
   return await dispatchRequest<InitiateUploadData, InitiateUploadResult>({
     method: "POST",
-    targetUrl: `${getRestApiUrl()}/storage/upload/initiate-multipart?storage_type=modelrunner-cdn-v3`,
+    targetUrl: `${getRestApiUrl()}/storage/upload/initiate-multipart`,
     input: {
       content_type: contentType,
       file_name: filename,

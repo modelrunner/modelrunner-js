@@ -45,3 +45,5 @@ Thumbs.db
 
 .aider*
 .env.aider
+
+.env
