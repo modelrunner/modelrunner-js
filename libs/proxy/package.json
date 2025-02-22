@@ -1,7 +1,7 @@
 {
   "name": "@modelrunner/server-proxy",
   "description": "The modelrunner.ai server proxy adapter for JavaScript and TypeScript Web frameworks",
-  "version": "1.1.1",
+  "version": "1.0.0",
   "license": "MIT",
   "repository": {
     "type": "git",
