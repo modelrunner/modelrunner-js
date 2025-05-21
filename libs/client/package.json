@@ -1,7 +1,7 @@
 {
   "name": "@modelrunner/client",
   "description": "The modelrunner.ai client for JavaScript and TypeScript",
-  "version": "1.0.3-alpha.2",
+  "version": "1.0.5-alpha.1",
   "license": "MIT",
   "repository": {
     "type": "git",
