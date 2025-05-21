@@ -139,5 +139,5 @@ export function createConfig(config: Config): RequiredConfig {
  * @returns the URL of the modelrunner REST api endpoint.
  */
 export function getRestApiUrl(): string {
-  return "https://rest.alpha.modelrunner.ai";
+  return "https://modelrunner.run";
 }

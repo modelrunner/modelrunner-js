@@ -40,10 +40,17 @@ export interface ModelRunnerClient {
   readonly streaming: StreamingClient;
 
   /**
-   * Runs a modelrunner endpoints identified by its `endpointId`.
+   * Runs a modelrunner endpoint identified by its `endpointId`.
    *
-   * @param endpointId the registered function revision id or alias.
-   * @returns the remote function output
+   * @param endpointId The endpoint id, e.g. `swook/inspyrenet`.
+   * @param options The request options, including the input payload.
+   * @returns A promise that resolves to the result of the request once it's completed.
+   *
+   * @note
+   * We **do not recommend** this use for most use cases as it will block the client
+   * until the response is received. Moreover, if the connection is closed before
+   * the response is received, the request will be lost. Instead, we recommend
+   * using the `subscribe` method for most use cases.
    */
   run<Id extends EndpointType>(
     endpointId: Id,
