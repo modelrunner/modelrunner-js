@@ -460,7 +460,7 @@ export const createQueueClient = ({
         },
         options: {
           signal: abortSignal,
-          retry: QUEUE_STATUS_RETRY_CONFIG,
+          retry: QUEUE_RETRY_CONFIG,
         },
       });
     },
@@ -480,7 +480,6 @@ export const createQueueClient = ({
         config,
         options: {
           signal: abortSignal,
-          retry: QUEUE_STATUS_RETRY_CONFIG,
         },
       });
     },

@@ -99,11 +99,11 @@ export async function dispatchRequest<Input, Output>(
     } catch (error) {
       lastError = error;
 
-      const shouldRetry =
+      const shouldNotRetry =
         attempt === retryOptions.maxRetries ||
         !isRetryableError(error, retryOptions.retryableStatusCodes) ||
         options.signal?.aborted;
-      if (!shouldRetry) {
+      if (!shouldNotRetry) {
         throw error;
       }
 
