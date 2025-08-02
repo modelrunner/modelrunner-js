@@ -1,6 +1,7 @@
 import { RequiredConfig } from "./config";
 import { buildUrl, dispatchRequest } from "./request";
 import { resultResponseHandler } from "./response";
+import { type RetryOptions, DEFAULT_RETRYABLE_STATUS_CODES } from "./retry";
 import { StorageClient } from "./storage";
 import { ModelRunnerStream, StreamingConnectionMode } from "./streaming";
 import { EndpointType, InputType, OutputType } from "./types/client";
@@ -21,6 +22,22 @@ export type QueueStatusSubscriptionOptions = QueueStatusOptions &
 type TimeoutId = ReturnType<typeof setTimeout> | undefined;
 
 const DEFAULT_POLL_INTERVAL = 500;
+
+// Queue operations benefit from more aggressive retry policies
+const QUEUE_RETRY_CONFIG: Partial<RetryOptions> = {
+  maxRetries: 3,
+  baseDelay: 1000,
+  maxDelay: 60000,
+  retryableStatusCodes: DEFAULT_RETRYABLE_STATUS_CODES,
+};
+
+// Status checking can be retried more aggressively since it's read-only
+const QUEUE_STATUS_RETRY_CONFIG: Partial<RetryOptions> = {
+  maxRetries: 5,
+  baseDelay: 1000,
+  maxDelay: 30000,
+  retryableStatusCodes: [...DEFAULT_RETRYABLE_STATUS_CODES, 500],
+};
 
 /**
  * Options for subscribing to the request queue.
@@ -261,6 +278,7 @@ export const createQueueClient = ({
         config,
         options: {
           signal: options.abortSignal,
+          retry: QUEUE_RETRY_CONFIG,
         },
       });
     },
@@ -280,6 +298,7 @@ export const createQueueClient = ({
         config,
         options: {
           signal: abortSignal,
+          retry: QUEUE_STATUS_RETRY_CONFIG,
         },
       });
     },
@@ -436,6 +455,7 @@ export const createQueueClient = ({
         },
         options: {
           signal: abortSignal,
+          retry: QUEUE_STATUS_RETRY_CONFIG,
         },
       });
     },
@@ -455,6 +475,7 @@ export const createQueueClient = ({
         config,
         options: {
           signal: abortSignal,
+          retry: QUEUE_STATUS_RETRY_CONFIG,
         },
       });
     },

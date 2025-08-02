@@ -117,6 +117,11 @@ export function createModelrunnerClient(
         },
         options: {
           signal: options.abortSignal,
+          retry: {
+            maxRetries: 3,
+            baseDelay: 500,
+            maxDelay: 15000,
+          },
         },
       });
     },
