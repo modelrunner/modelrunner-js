@@ -1,6 +1,108 @@
 import { getRestApiUrl, RequiredConfig } from "./config";
 import { dispatchRequest } from "./request";
 import { isPlainObject } from "./utils";
+
+type ObjectExpiration =
+  | "never"
+  | "immediate"
+  | "1h"
+  | "1d"
+  | "7d"
+  | "30d"
+  | "1y"
+  | number;
+
+export const OBJECT_LIFECYCYLE_PREFERENCE_HEADER =
+  "x-modelrunner-object-lifecycle-preference";
+
+/**
+ * Configuration for object lifecycle and storage behavior.
+ */
+export interface StorageSettings {
+  /**
+   * The expiration time for the stored files (images, videos, etc.). You can specify one of the enumerated values or a number of seconds.
+   */
+  expiresIn: ObjectExpiration;
+}
+
+type UploadLifecycleConfig = {
+  /**
+   * Duration in seconds before the object expires and is deleted.
+   * Set to a large value (e.g., 31536000000) for effectively unlimited storage.
+   *
+   * Common values:
+   * - 604800: 7 days
+   * - 2592000: 30 days
+   * - 31536000: 1 year
+   */
+  expiration_duration_seconds?: number;
+
+  /**
+   * Whether to allow I/O storage for this object.
+   * @default undefined (uses account default)
+   */
+  allow_io_storage?: boolean;
+};
+
+const EXPIRATION_VALUES: Record<ObjectExpiration, number | undefined> = {
+  never: 3153600000, // 100 years
+  immediate: undefined,
+  "1h": 3600,
+  "1d": 86400,
+  "7d": 604800,
+  "30d": 2592000,
+  "1y": 31536000,
+};
+
+/**
+ * Converts an `StorageSettings` to the expiration duration in seconds.
+ * @param lifecycle the lifecycle preference
+ * @returns the expiration duration in seconds, or undefined if not applicable
+ */
+export function getExpirationDurationSeconds(
+  lifecycle: StorageSettings,
+): number | undefined {
+  const { expiresIn } = lifecycle;
+  return typeof expiresIn === "number"
+    ? expiresIn
+    : EXPIRATION_VALUES[expiresIn];
+}
+
+/**
+ * Builds the headers for the Object Lifecycle preference to be used in API requests.
+ * This is used by the queue and run APIs to control the lifecycle of generated objects.
+ *
+ * @param lifecycle the lifecycle preference
+ * @returns a record with the `X-Modelrunner-Object-Lifecycle-Preference` header
+ */
+export function buildObjectLifecycleHeaders(
+  lifecycle: StorageSettings | undefined,
+): Record<string, string> {
+  if (!lifecycle) {
+    return {};
+  }
+  const expirationDurationSeconds = getExpirationDurationSeconds(lifecycle);
+  if (expirationDurationSeconds === undefined) {
+    return {};
+  }
+  return {
+    [OBJECT_LIFECYCYLE_PREFERENCE_HEADER]: JSON.stringify({
+      expiration_duration_seconds: expirationDurationSeconds,
+    }),
+  };
+}
+
+/**
+ * Options for uploading a file.
+ */
+export type UploadOptions = {
+  /**
+   * Custom lifecycle configuration for the uploaded file.
+   * This object will be sent as the X-Modelrunner-Object-Lifecycle header.
+   */
+  lifecycle?: StorageSettings;
+};
+
 /**
  * File support for the client. This interface establishes the contract for
  * uploading files to the server and transforming the input to replace file
@@ -10,10 +112,10 @@ export interface StorageClient {
   /**
    * Upload a file to the server. Returns the URL of the uploaded file.
    * @param file the file to upload
-   * @param options optional parameters, such as custom file name
+   * @param options optional parameters, such as lifecycle configuration
    * @returns the URL of the uploaded file
    */
-  upload: (file: Blob) => Promise<string>;
+  upload: (file: Blob, options?: UploadOptions) => Promise<string>;
 
   /**
    * Transform the input to replace file objects with URLs. This is used
@@ -45,7 +147,7 @@ type InitiateUploadData = {
  * @returns the file extension or `bin` if the content type is not recognized.
  */
 function getExtensionFromContentType(contentType: string): string {
-  const [_, fileType] = contentType.split("/");
+  const [, fileType] = contentType.split("/");
   return fileType.split(/[-;]/)[0] ?? "bin";
 }
 
@@ -57,18 +159,30 @@ async function initiateUpload(
   file: Blob,
   config: RequiredConfig,
   contentType: string,
+  lifecycle?: StorageSettings,
 ): Promise<InitiateUploadResult> {
   const filename =
     file.name || `${Date.now()}.${getExtensionFromContentType(contentType)}`;
 
+  const headers: Record<string, string> = {};
+  if (lifecycle) {
+    const lifecycleConfig: UploadLifecycleConfig = {
+      expiration_duration_seconds: getExpirationDurationSeconds(lifecycle),
+      allow_io_storage: lifecycle.expiresIn !== "immediate",
+    };
+    headers["X-Modelrunner-Object-Lifecycle"] = JSON.stringify(lifecycleConfig);
+  }
+
   return await dispatchRequest<InitiateUploadData, InitiateUploadResult>({
     method: "POST",
+    // NOTE: We want to test V3 without making it the default at the API level
     targetUrl: `${getRestApiUrl()}/storage/upload/initiate`,
     input: {
       content_type: contentType,
       file_name: filename,
     },
     config,
+    headers,
   });
 }
 
@@ -80,9 +194,15 @@ async function initiateMultipartUpload(
   file: Blob,
   config: RequiredConfig,
   contentType: string,
+  lifecycle?: StorageSettings,
 ): Promise<InitiateUploadResult> {
   const filename =
     file.name || `${Date.now()}.${getExtensionFromContentType(contentType)}`;
+
+  const headers: Record<string, string> = {};
+  if (lifecycle) {
+    headers["X-Modelrunner-Object-Lifecycle"] = JSON.stringify(lifecycle);
+  }
 
   return await dispatchRequest<InitiateUploadData, InitiateUploadResult>({
     method: "POST",
@@ -92,6 +212,7 @@ async function initiateMultipartUpload(
       file_name: filename,
     },
     config,
+    headers,
   });
 }
 
@@ -127,11 +248,12 @@ async function partUploadRetries(
 async function multipartUpload(
   file: Blob,
   config: RequiredConfig,
+  lifecycle?: StorageSettings,
 ): Promise<string> {
   const { fetch, responseHandler } = config;
   const contentType = file.type || "application/octet-stream";
   const { upload_url: uploadUrl, file_url: url } =
-    await initiateMultipartUpload(file, config, contentType);
+    await initiateMultipartUpload(file, config, contentType, lifecycle);
 
   // Break the file into 10MB chunks
   const chunkSize = 10 * 1024 * 1024;
@@ -184,10 +306,12 @@ export function createStorageClient({
   config,
 }: StorageClientDependencies): StorageClient {
   const ref: StorageClient = {
-    upload: async (file: Blob) => {
+    upload: async (file: Blob, options?: UploadOptions) => {
+      const lifecycle = options?.lifecycle;
+
       // Check for 90+ MB file size to do multipart upload
       if (file.size > 90 * 1024 * 1024) {
-        return await multipartUpload(file, config);
+        return await multipartUpload(file, config, lifecycle);
       }
 
       const contentType = file.type || "application/octet-stream";
@@ -197,6 +321,7 @@ export function createStorageClient({
         file,
         config,
         contentType,
+        lifecycle,
       );
       const response = await fetch(uploadUrl, {
         method: "PUT",

@@ -72,14 +72,14 @@ export type StreamOptions<Input> = {
 
 const EVENT_STREAM_TIMEOUT = 15 * 1000;
 
-type ModelRunnerStreamEventType = "data" | "error" | "done";
+type ModelrunnerStreamEventType = "data" | "error" | "done";
 
 type EventHandler<T = any> = (event: T) => void;
 
 /**
  * The class representing a streaming response. With t
  */
-export class ModelRunnerStream<Input, Output> {
+export class ModelrunnerStream<Input, Output> {
   // properties
   config: RequiredConfig;
   endpointId: string;
@@ -87,7 +87,7 @@ export class ModelRunnerStream<Input, Output> {
   options: StreamOptions<Input>;
 
   // support for event listeners
-  private listeners: Map<ModelRunnerStreamEventType, EventHandler[]> =
+  private listeners: Map<ModelrunnerStreamEventType, EventHandler[]> =
     new Map();
   private buffer: Output[] = [];
 
@@ -95,6 +95,7 @@ export class ModelRunnerStream<Input, Output> {
   private currentData: Output | undefined = undefined;
   private lastEventTimestamp = 0;
   private streamClosed = false;
+  private _requestId: string | null = null;
   private donePromise: Promise<Output>;
 
   private abortController = new AbortController();
@@ -120,6 +121,7 @@ export class ModelRunnerStream<Input, Output> {
             message: "Streaming connection is already closed.",
             status: 400,
             body: undefined,
+            requestId: this._requestId || undefined,
           }),
         );
       }
@@ -166,6 +168,7 @@ export class ModelRunnerStream<Input, Output> {
           body: input && method !== "get" ? JSON.stringify(input) : undefined,
           signal: this.abortController.signal,
         });
+        this._requestId = response.headers.get("x-modelrunner-request-id");
         return await this.handleResponse(response);
       }
       return await dispatchRequest({
@@ -177,7 +180,10 @@ export class ModelRunnerStream<Input, Output> {
           headers: {
             accept: options.accept ?? CONTENT_TYPE_EVENT_STREAM,
           },
-          responseHandler: this.handleResponse,
+          responseHandler: async (response) => {
+            this._requestId = response.headers.get("x-modelrunner-request-id");
+            return await this.handleResponse(response);
+          },
           signal: this.abortController.signal,
         },
       });
@@ -206,6 +212,7 @@ export class ModelRunnerStream<Input, Output> {
           message: "Response body is empty.",
           status: 400,
           body: undefined,
+          requestId: this._requestId || undefined,
         }),
       );
       return;
@@ -223,6 +230,7 @@ export class ModelRunnerStream<Input, Output> {
             this.emit("done", this.currentData);
             return;
           }
+          this.buffer.push(value as Output);
           this.currentData = value as Output;
           this.emit("data", value);
           emitRawChunk();
@@ -267,6 +275,7 @@ export class ModelRunnerStream<Input, Output> {
           new ApiError({
             message: `Event stream timed out after ${(timeout / 1000).toFixed(0)} seconds with no messages.`,
             status: 408,
+            requestId: this._requestId || undefined,
           }),
         );
       }
@@ -296,19 +305,20 @@ export class ModelRunnerStream<Input, Output> {
         : new ApiError({
             message: error.message ?? "An unknown error occurred",
             status: 500,
+            requestId: this._requestId || undefined,
           });
     this.emit("error", apiError);
     return;
   };
 
-  public on = (type: ModelRunnerStreamEventType, listener: EventHandler) => {
+  public on = (type: ModelrunnerStreamEventType, listener: EventHandler) => {
     if (!this.listeners.has(type)) {
       this.listeners.set(type, []);
     }
     this.listeners.get(type)?.push(listener);
   };
 
-  private emit = (type: ModelRunnerStreamEventType, event: any) => {
+  private emit = (type: ModelrunnerStreamEventType, event: any) => {
     const listeners = this.listeners.get(type) || [];
     for (const listener of listeners) {
       listener(event);
@@ -360,14 +370,23 @@ export class ModelRunnerStream<Input, Output> {
   /**
    * Gets the `AbortSignal` instance that can be used to listen for abort events.
    *
-   * **Note:** this signal is internal to the `ModelRunnerStream` instance. If you pass your
-   * own abort signal, the `ModelRunnerStream` will listen to it and abort it appropriately.
+   * **Note:** this signal is internal to the `ModelrunnerStream` instance. If you pass your
+   * own abort signal, the `ModelrunnerStream` will listen to it and abort it appropriately.
    *
    * @returns the `AbortSignal` instance.
    * @see https://developer.mozilla.org/en-US/docs/Web/API/AbortSignal
    */
   public get signal() {
     return this.abortController.signal;
+  }
+
+  /**
+   * Gets the request id of the streaming request.
+   *
+   * @returns the request id.
+   */
+  public get requestId() {
+    return this._requestId;
   }
 }
 
@@ -380,14 +399,14 @@ export interface StreamingClient {
    * object as a result, that can be used to get partial results through either
    * `AsyncIterator` or through an event listener.
    *
-   * @param endpointId the endpoint id, e.g. `modelrunner/llavav15-13b`.
+   * @param endpointId the endpoint id, e.g. `swook/inspyrenet`.
    * @param options the request options, including the input payload.
-   * @returns the `ModelRunnerStream` instance.
+   * @returns the `ModelrunnerStream` instance.
    */
   stream<Id extends EndpointType>(
     endpointId: Id,
     options: StreamOptions<InputType<Id>>,
-  ): Promise<ModelRunnerStream<InputType<Id>, OutputType<Id>>>;
+  ): Promise<ModelrunnerStream<InputType<Id>, OutputType<Id>>>;
 }
 
 type StreamingClientDependencies = {
@@ -407,7 +426,7 @@ export function createStreamingClient({
       const input = options.input
         ? await storage.transformInput(options.input)
         : undefined;
-      return new ModelRunnerStream<InputType<Id>, OutputType<Id>>(
+      return new ModelrunnerStream<InputType<Id>, OutputType<Id>>(
         endpointId,
         config,
         {

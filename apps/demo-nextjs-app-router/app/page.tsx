@@ -150,7 +150,7 @@ export default function Home() {
           <div className="mx-auto">
             {image && (
               // eslint-disable-next-line @next/next/no-img-element
-              <img src={image.url} alt="" />
+              <img src={image} alt="" />
             )}
           </div>
           <div className="space-y-2">

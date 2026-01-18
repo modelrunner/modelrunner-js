@@ -1,9 +1,9 @@
 import { RequiredConfig } from "./config";
 import { buildUrl, dispatchRequest } from "./request";
 import { resultResponseHandler } from "./response";
-import { type RetryOptions, DEFAULT_RETRYABLE_STATUS_CODES } from "./retry";
-import { StorageClient } from "./storage";
-import { ModelRunnerStream, StreamingConnectionMode } from "./streaming";
+import { DEFAULT_RETRYABLE_STATUS_CODES, RetryOptions } from "./retry";
+import { buildObjectLifecycleHeaders, StorageClient } from "./storage";
+import { ModelrunnerStream, StreamingConnectionMode } from "./streaming";
 import { EndpointType, InputType, OutputType } from "./types/client";
 import {
   CompletedQueueStatus,
@@ -23,6 +23,10 @@ export type QueueStatusSubscriptionOptions = QueueStatusOptions &
 type TimeoutId = ReturnType<typeof setTimeout> | undefined;
 
 const DEFAULT_POLL_INTERVAL = 500;
+
+const QUEUE_PRIORITY_HEADER = "x-modelrunner-queue-priority";
+
+const RUNNER_HINT_HEADER = "x-modelrunner-hint";
 
 type QueueModeOptions =
   | {
@@ -96,9 +100,20 @@ type QueueCommonSubscribeOptions = {
 
   /**
    * The priority of the request. It defaults to `normal`.
+   * This will be sent as the `x-modelrunner-queue-priority` header.
+   *
    * @see QueuePriority
    */
   priority?: QueuePriority;
+
+  /**
+   * Additional HTTP headers to include in the submit request.
+   * Note: `priority`, `hint`, and `objectLifecycle` will override the following headers:
+   *  - `x-modelrunner-queue-priority`
+   *  - `x-modelrunner-hint`
+   *  - `x-modelrunner-object-lifecycle-preference`
+   */
+  headers?: Record<string, string>;
 };
 
 /**
@@ -119,15 +134,27 @@ export type SubmitOptions<Input> = RunOptions<Input> & {
 
   /**
    * The priority of the request. It defaults to `normal`.
+   * This will be sent as the `x-modelrunner-queue-priority` header.
+   *
    * @see QueuePriority
    */
   priority?: QueuePriority;
 
   /**
    * A hint for the runner to use when processing the request.
-   * This will be sent as the `X-ModelRunner-Hint` header.
+   * This will be sent as the `x-modelrunner-hint` header.
    */
   hint?: string;
+
+  /**
+   * Additional HTTP headers to include in the submit request.
+   *
+   * Note: `priority`, `hint`, and `objectLifecycle` will override the following headers:
+   *  - `x-modelrunner-queue-priority`
+   *  - `x-modelrunner-hint`
+   *  - `x-modelrunner-object-lifecycle-preference`
+   */
+  headers?: Record<string, string>;
 };
 
 type BaseQueueOptions = {
@@ -210,7 +237,7 @@ export interface QueueClient {
   streamStatus(
     endpointId: string,
     options: QueueStatusStreamOptions,
-  ): Promise<ModelRunnerStream<unknown, QueueStatus>>;
+  ): Promise<ModelrunnerStream<unknown, QueueStatus>>;
 
   /**
    * Subscribes to updates for a specific request in the queue using polling or streaming.
@@ -263,11 +290,23 @@ export const createQueueClient = ({
       endpointId: string,
       options: SubmitOptions<Input>,
     ): Promise<InQueueQueueStatus> {
-      const { webhookUrl, priority, hint, ...runOptions } = options;
+      const {
+        webhookUrl,
+        priority,
+        hint,
+        headers,
+        storageSettings,
+        ...runOptions
+      } = options;
       const input = options.input
         ? await storage.transformInput(options.input)
         : undefined;
-
+      const extraHeaders = Object.fromEntries(
+        Object.entries(headers ?? {}).map(([key, value]) => [
+          key.toLowerCase(),
+          value,
+        ]),
+      );
       return dispatchRequest<Input, InQueueQueueStatus>({
         method: options.method,
         targetUrl: buildUrl(endpointId, {
@@ -276,8 +315,10 @@ export const createQueueClient = ({
           query: webhookUrl ? { modelrunner_webhook: webhookUrl } : undefined,
         }),
         headers: {
-          "x-modelrunner-queue-priority": priority ?? "normal",
-          ...(hint && { "x-modelrunner-hint": hint }),
+          ...extraHeaders,
+          ...buildObjectLifecycleHeaders(storageSettings),
+          [QUEUE_PRIORITY_HEADER]: priority ?? "normal",
+          ...(hint && { [RUNNER_HINT_HEADER]: hint }),
         },
         input: input as Input,
         config,
@@ -311,7 +352,7 @@ export const createQueueClient = ({
     async streamStatus(
       endpointId: string,
       { requestId, logs = false, connectionMode }: QueueStatusStreamOptions,
-    ): Promise<ModelRunnerStream<unknown, QueueStatus>> {
+    ): Promise<ModelrunnerStream<unknown, QueueStatus>> {
       const appId = parseEndpointId(endpointId);
       const prefix = appId.namespace ? `${appId.namespace}/` : "";
 
@@ -325,7 +366,7 @@ export const createQueueClient = ({
         query: queryParams,
       });
 
-      return new ModelRunnerStream<unknown, QueueStatus>(endpointId, config, {
+      return new ModelrunnerStream<unknown, QueueStatus>(endpointId, config, {
         url,
         method: "get",
         connectionMode,

@@ -14,7 +14,7 @@ import { Result, RunOptions } from "./types/common";
  *
  * @see createModelrunnerClient
  */
-export interface ModelRunnerClient {
+export interface ModelrunnerClient {
   /**
    * The queue client to interact with the queue API.
    */
@@ -76,19 +76,19 @@ export interface ModelRunnerClient {
    *
    * @param endpointId the endpoint id, e.g. `modelrunner/llavav15-13b`.
    * @param options the request options, including the input payload.
-   * @returns the `ModelRunnerStream` instance.
+   * @returns the `ModelrunnerStream` instance.
    */
   stream: StreamingClient["stream"];
 }
 
 /**
- * Creates a new reference of the `ModelRunnerClient`.
+ * Creates a new reference of the `ModelrunnerClient`.
  * @param userConfig Optional configuration to override the default settings.
- * @returns a new instance of the `ModelRunnerClient`.
+ * @returns a new instance of the `ModelrunnerClient`.
  */
 export function createModelrunnerClient(
   userConfig: Config = {},
-): ModelRunnerClient {
+): ModelrunnerClient {
   const config = createConfig(userConfig);
   const storage = createStorageClient({ config });
   const queue = createQueueClient({ config, storage });

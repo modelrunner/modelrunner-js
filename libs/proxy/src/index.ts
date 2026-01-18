@@ -8,7 +8,7 @@ const MODELRUNNER_KEY_SECRET = process.env.MODELRUNNER_KEY_SECRET;
 
 export type HeaderValue = string | string[] | undefined | null;
 
-const MODELRUNNER_URL_REG_EXP = /(\.|^)modelrunner\.(run|ai)$/;
+const MODELRUNNER_URL_REG_EXP = /(\.|^)modelrunner\.(run|ai|dev)$/;
 
 /**
  * The proxy behavior that is passed to the proxy handler. This is a subset of

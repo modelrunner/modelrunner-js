@@ -21,19 +21,9 @@ modelrunner.config({
 
 **Note:** Ensure you've reviewed the [modelrunner.ai getting started guide](https://docs.modelrunner.ai) to acquire your credentials and register your functions. Also, make sure your credentials are always protected. See the [../proxy](../proxy) package for a secure way to use the client in client-side applications.
 
-## Running functions with `modelrunner.run`
-
-The `modelrunner.run` method is the simplest way to execute a function. It returns a promise that resolves to the function's result:
-
-```ts
-const result = await modelrunner.run("my-function-id", {
-  input: { foo: "bar" },
-});
-```
-
 ## Long-running functions with `modelrunner.subscribe`
 
-The `modelrunner.subscribe` method offers a powerful way to rely on the [queue system](https://docs.modelrunner.ai/clients/js-client#long-running-jobs-with-modelrunner-subscribe) to execute long-running functions. It returns the result once it's done like any other async function, so your don't have to deal with queue status updates yourself. However, it does support queue events, in case you want to listen and react to them:
+The `modelrunner.subscribe` method offers a powerful way to rely on the [queue system](https://docs.modelrunner.ai/clients/js-client#call-a-model) to execute long-running functions. It returns the result once it's done like any other async function, so your don't have to deal with queue status updates yourself. However, it does support queue events, in case you want to listen and react to them:
 
 ```ts
 const result = await modelrunner.subscribe("my-function-id", {

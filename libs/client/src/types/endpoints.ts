@@ -1,31 +1,18 @@
-export type SyncLipsyncInput = {
-  /**
-   * The model to use for lipsyncing Default value: `"lipsync-1.9.0-beta"`
-   */
-  model?: "lipsync-1.8.0" | "lipsync-1.7.1" | "lipsync-1.9.0-beta";
-  /**
-   * URL of the input video
-   */
-  video_url: string | Blob | File;
-  /**
-   * URL of the input audio
-   */
-  audio_url: string | Blob | File;
-  /**
-   * Lipsync mode when audio and video durations are out of sync. Default value: `"cut_off"`
-   */
-  sync_mode?: "cut_off" | "loop" | "bounce";
+export type IllusionDiffusionInput = {
+  prompt: string;
+  image_url: string | Blob | File;
+  image_size: "square" | "square_hd" | "square_uhd" | "square_4k" | "square_8k";
 };
-export type SyncLipsyncOutput = {
+export type IllusionDiffusionOutput = {
   /**
-   * The generated video
+   * The generated image
    */
-  video: File;
+  image: string;
 };
 
 export type EndpointTypeMap = {
-  "modelrunner/sync-lipsync": {
-    input: SyncLipsyncInput;
-    output: SyncLipsyncOutput;
+  "modelrunner/illusion-diffusion": {
+    input: IllusionDiffusionInput;
+    output: IllusionDiffusionOutput;
   };
 };
