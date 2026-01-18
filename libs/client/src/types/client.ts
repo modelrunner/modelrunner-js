@@ -11,4 +11,4 @@ export type InputType<T extends string> = T extends keyof EndpointTypeMap
 // Get output type based on endpoint ID
 export type OutputType<T extends string> = T extends keyof EndpointTypeMap
   ? EndpointTypeMap[T]["output"]
-  : any;
+  : string | string[];
