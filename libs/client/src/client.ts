@@ -1,4 +1,5 @@
 import { Config, createConfig } from "./config";
+import { applyMetadata } from "./metadata";
 import { createQueueClient, QueueClient, QueueSubscribeOptions } from "./queue";
 import { createRealtimeClient, RealtimeClient } from "./realtime";
 import { buildUrl, dispatchRequest } from "./request";
@@ -104,13 +105,15 @@ export function createModelrunnerClient(
       endpointId: Id,
       options: RunOptions<InputType<Id>> = {},
     ): Promise<Result<OutputType<Id>>> {
+      const { metadata, ...urlOptions } = options;
       const input = options.input
         ? await storage.transformInput(options.input)
         : undefined;
+      const body = applyMetadata(input, { metadata, method: options.method });
       return dispatchRequest<InputType<Id>, Result<OutputType<Id>>>({
         method: options.method,
-        targetUrl: buildUrl(endpointId, options),
-        input: input as InputType<Id>,
+        targetUrl: buildUrl(endpointId, urlOptions),
+        input: body as InputType<Id>,
         config: {
           ...config,
           responseHandler: resultResponseHandler,

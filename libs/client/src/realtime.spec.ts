@@ -95,7 +95,7 @@ describe("createRealtimeClient", () => {
     expect(WebSocketMock).toHaveBeenCalledTimes(1);
     const socket = sockets[0];
     expect(socket.url).toBe(
-      "wss://fal.run/123/myapp/custom/path?fal_jwt_token=mock-token",
+      "wss://modelrunner.run/123/myapp/custom/path?modelrunner_jwt_token=mock-token",
     );
   });
 

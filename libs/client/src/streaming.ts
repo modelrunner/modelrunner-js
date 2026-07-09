@@ -1,10 +1,12 @@
 import { createParser } from "eventsource-parser";
 import { getTemporaryAuthToken } from "./auth";
 import { RequiredConfig } from "./config";
+import { applyMetadata } from "./metadata";
 import { buildUrl, dispatchRequest } from "./request";
 import { ApiError, defaultResponseHandler } from "./response";
 import { type StorageClient } from "./storage";
 import { EndpointType, InputType, OutputType } from "./types/client";
+import { RequestMetadata } from "./types/common";
 
 export type StreamingConnectionMode = "client" | "server";
 
@@ -68,6 +70,21 @@ export type StreamOptions<Input> = {
    * The signal to abort the request.
    */
   readonly signal?: AbortSignal;
+
+  /**
+   * User-defined tags stored alongside the request, which can later be used to
+   * filter it. They are never sent to the model and never merged into `input`.
+   *
+   * At most 16 keys, each key 1 to 64 characters, and each value a string of at
+   * most 512 characters. Violations are rejected before the request is sent.
+   *
+   * Note that `metadata` is a reserved key at the top level of the request
+   * body. Servers that predate request metadata treat it as model input, so an
+   * endpoint with a strict input schema will reject the request.
+   *
+   * @see RequestMetadata
+   */
+  readonly metadata?: RequestMetadata;
 };
 
 const EVENT_STREAM_TIMEOUT = 15 * 1000;
@@ -423,15 +440,17 @@ export function createStreamingClient({
       endpointId: Id,
       options: StreamOptions<InputType<Id>>,
     ) {
+      const { metadata, ...streamOptions } = options;
       const input = options.input
         ? await storage.transformInput(options.input)
         : undefined;
+      const body = applyMetadata(input, { metadata, method: options.method });
       return new ModelrunnerStream<InputType<Id>, OutputType<Id>>(
         endpointId,
         config,
         {
-          ...options,
-          input: input as InputType<Id>,
+          ...streamOptions,
+          input: body as InputType<Id>,
         },
       );
     },

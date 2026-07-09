@@ -10,6 +10,13 @@ export type Result<T> = {
 };
 
 /**
+ * A flat map of user-defined tags attached to a request.
+ *
+ * @see RunOptions.metadata
+ */
+export type RequestMetadata = Record<string, string>;
+
+/**
  * The function input and other configuration when running
  * the function, such as the HTTP method to use.
  */
@@ -38,6 +45,21 @@ export type RunOptions<Input> = {
    * @see https://docs.modelrunner.ai/clients/js-client#object-lifecycle
    */
   readonly storageSettings?: StorageSettings;
+
+  /**
+   * User-defined tags stored alongside the request, which can later be used to
+   * filter it. They are never sent to the model and never merged into `input`.
+   *
+   * At most 16 keys, each key 1 to 64 characters, and each value a string of at
+   * most 512 characters. Violations are rejected before the request is sent.
+   *
+   * Note that `metadata` is a reserved key at the top level of the request
+   * body. Servers that predate request metadata treat it as model input, so an
+   * endpoint with a strict input schema will reject the request.
+   *
+   * @see RequestMetadata
+   */
+  readonly metadata?: RequestMetadata;
 };
 
 export type UrlOptions = {

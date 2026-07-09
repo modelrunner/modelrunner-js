@@ -30,9 +30,27 @@ export class ApiError<Body> extends Error {
   }
 }
 
+type ZodIssueLike = {
+  code?: string;
+  path?: Array<string | number>;
+  message?: string;
+};
+
 type ValidationErrorBody = {
   detail: ValidationErrorInfo[];
+  message?: string;
+  details?: {
+    validationErrors?: ZodIssueLike[];
+  };
 };
+
+function toFieldErrors(issues: ZodIssueLike[]): ValidationErrorInfo[] {
+  return issues.map((issue) => ({
+    loc: issue.path ?? [],
+    msg: issue.message ?? "Invalid value",
+    type: issue.code ?? "invalid",
+  }));
+}
 
 export class ValidationError extends ApiError<ValidationErrorBody> {
   constructor(args: ApiErrorArgs) {
@@ -71,13 +89,22 @@ export async function defaultResponseHandler<Output>(
   if (!response.ok) {
     if (contentType.includes("application/json")) {
       const body = await response.json();
-      const ErrorType = status === 422 ? ValidationError : ApiError;
-      throw new ErrorType({
-        message: body.message || statusText,
-        status,
-        body,
-        requestId,
-      });
+      const message = body.message || statusText;
+      if (status === 422) {
+        throw new ValidationError({ message, status, body, requestId });
+      }
+      const validationErrors = body?.details?.validationErrors;
+      if (status === 400 && Array.isArray(validationErrors)) {
+        throw new ValidationError({
+          message,
+          status,
+          // normalize the issues into `detail` so `fieldErrors` reads them,
+          // while the raw ones stay reachable at `body.details`
+          body: { ...body, detail: toFieldErrors(validationErrors) },
+          requestId,
+        });
+      }
+      throw new ApiError({ message, status, body, requestId });
     }
     throw new ApiError({
       message: `HTTP ${status}: ${statusText}`,

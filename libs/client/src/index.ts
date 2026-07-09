@@ -18,6 +18,7 @@ export type { ModelrunnerStream, StreamingClient } from "./streaming";
 export * from "./types/common";
 export type {
   QueueStatus,
+  RequestMetadata,
   ValidationErrorInfo,
   WebHookResponse,
 } from "./types/common";

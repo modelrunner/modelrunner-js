@@ -74,3 +74,68 @@ describe("queue.submit headers", () => {
     expect(call.headers["x-modelrunner-hint"]).toBeUndefined();
   });
 });
+
+describe("queue.submit metadata", () => {
+  const config: RequiredConfig = createConfig({ credentials: "test-key" });
+
+  const storage: StorageClient = {
+    upload: jest.fn(),
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    transformInput: async (input: any) => input,
+  };
+
+  beforeEach(() => {
+    (dispatchRequest as jest.Mock).mockReset();
+    (dispatchRequest as jest.Mock).mockResolvedValue({
+      status: "IN_QUEUE",
+      request_id: "req_123",
+    });
+  });
+
+  it("sends metadata as a sibling of the input fields in the body", async () => {
+    const queue = createQueueClient({ config, storage });
+    await queue.submit("swook/inspyrenet", {
+      input: { prompt: "a red panda" },
+      metadata: { project: "onboarding-demo", batch: "42" },
+    });
+
+    const call = (dispatchRequest as jest.Mock).mock.calls[0][0];
+    expect(call.input).toEqual({
+      prompt: "a red panda",
+      metadata: { project: "onboarding-demo", batch: "42" },
+    });
+  });
+
+  it("omits the metadata key when not provided", async () => {
+    const queue = createQueueClient({ config, storage });
+    await queue.submit("swook/inspyrenet", { input: { prompt: "hi" } });
+
+    const call = (dispatchRequest as jest.Mock).mock.calls[0][0];
+    expect(call.input).not.toHaveProperty("metadata");
+  });
+
+  it("keeps metadata out of the target url and the headers", async () => {
+    const queue = createQueueClient({ config, storage });
+    await queue.submit("swook/inspyrenet", {
+      input: { prompt: "hi" },
+      metadata: { project: "onboarding-demo" },
+    });
+
+    const call = (dispatchRequest as jest.Mock).mock.calls[0][0];
+    expect(call.targetUrl).not.toContain("metadata");
+    expect(call.targetUrl).not.toContain("object%20Object");
+    expect(call.headers).not.toHaveProperty("metadata");
+  });
+
+  it("rejects invalid metadata before dispatching the request", async () => {
+    const queue = createQueueClient({ config, storage });
+    const metadata = Object.fromEntries(
+      Array.from({ length: 17 }, (_, i) => [`key-${i}`, "value"]),
+    );
+
+    await expect(
+      queue.submit("swook/inspyrenet", { input: { prompt: "hi" }, metadata }),
+    ).rejects.toThrow("Invalid metadata");
+    expect(dispatchRequest).not.toHaveBeenCalled();
+  });
+});

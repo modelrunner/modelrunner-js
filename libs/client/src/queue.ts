@@ -1,4 +1,5 @@
 import { RequiredConfig } from "./config";
+import { applyMetadata } from "./metadata";
 import { buildUrl, dispatchRequest } from "./request";
 import { resultResponseHandler } from "./response";
 import { DEFAULT_RETRYABLE_STATUS_CODES, RetryOptions } from "./retry";
@@ -296,11 +297,13 @@ export const createQueueClient = ({
         hint,
         headers,
         storageSettings,
+        metadata,
         ...runOptions
       } = options;
       const input = options.input
         ? await storage.transformInput(options.input)
         : undefined;
+      const body = applyMetadata(input, { metadata, method: options.method });
       const extraHeaders = Object.fromEntries(
         Object.entries(headers ?? {}).map(([key, value]) => [
           key.toLowerCase(),
@@ -320,7 +323,7 @@ export const createQueueClient = ({
           [QUEUE_PRIORITY_HEADER]: priority ?? "normal",
           ...(hint && { [RUNNER_HINT_HEADER]: hint }),
         },
-        input: input as Input,
+        input: body as Input,
         config,
         options: {
           signal: options.abortSignal,
