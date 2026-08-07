@@ -103,6 +103,19 @@ interface BaseQueueStatus {
 export interface InQueueQueueStatus extends BaseQueueStatus {
   status: "IN_QUEUE";
   queue_position: number;
+
+  /**
+   * Echo of the `webhookUrl` the request was submitted with, when one was set.
+   * Present only on the response to `queue.submit`, and the proof that the
+   * server understood the webhook — a server that ignored it echoes nothing.
+   */
+  webhook?: string;
+
+  /**
+   * Echo of the resolved event filter. Defaults to `["completed"]` server-side
+   * when a `webhookUrl` is set without `webhookEvents`.
+   */
+  webhook_events_filter?: WebhookEventName[];
 }
 
 export interface InProgressQueueStatus extends BaseQueueStatus {
@@ -136,8 +149,109 @@ export type ValidationErrorInfo = {
 };
 
 /**
- * Represents the response from a WebHook request.
- * This is a union type that varies based on the `status` property.
+ * A lifecycle event a request can notify a webhook about.
+ *
+ * `start` is **best effort**: a fast job can transition straight from `IN_QUEUE`
+ * to `COMPLETED` between two provider polls, in which case only `completed` is
+ * delivered. Never block waiting for `start`.
+ */
+export type WebhookEventName = "start" | "completed";
+
+/**
+ * Whether the request was billed, and how.
+ *
+ * 🚨 This — not `status` — is what tells a successful generation from a failed
+ * one. A failed generation is normalized to `status: "COMPLETED"` with
+ * `billingStatus: "failed"`, so code that keys off `status` alone reads every
+ * failure as a success.
+ */
+export type WebhookBillingStatus = "pending" | "partial" | "charged" | "failed";
+
+/**
+ * The JSON body delivered to a webhook endpoint.
+ *
+ * It is the same object `GET /{owner}/{alias}/requests/{id}` returns, plus
+ * `event` and `billingStatus` — so there is only one shape to learn.
+ *
+ * Note the timestamps are ISO-8601 **strings**, not `Date` instances: this is
+ * whatever `JSON.parse` produced from the delivered bytes.
+ */
+export type WebhookPayload<Output = any, Input = any> = {
+  /** The request id. Note this is `id`, not the queue API's `request_id`. */
+  id: string;
+  modelEndpoint: string;
+  status: "IN_QUEUE" | "IN_PROGRESS" | "COMPLETED" | "FAILED" | "CANCELLED";
+  event: WebhookEventName;
+
+  /** @see WebhookBillingStatus — the real success/failure discriminator. */
+  billingStatus: WebhookBillingStatus;
+
+  output: Output;
+
+  /**
+   * The input the request was submitted with. Replaced by
+   * `{ _elided: string }` when it serializes to more than 64KB — fetch the
+   * request itself in that case.
+   */
+  input: Input | { _elided: string };
+
+  /** ISO-8601. */
+  createdAt: string;
+  /** ISO-8601. */
+  updatedAt?: string;
+  inferenceTime?: number;
+  delayTime?: number;
+  logs?: string;
+  error?: string;
+  thumbnails?: Array<{
+    type: "image" | "video";
+    url: string;
+    posterUrl?: string;
+  }>;
+
+  /**
+   * ISO-8601 timestamp set once the request's payloads were removed under the
+   * retention policy — which is what distinguishes "we deleted it" from "the
+   * model returned nothing", since both leave `input`/`output` as `{}`.
+   */
+  payloadsPurgedAt?: string | null;
+
+  wrapperId?: string | null;
+  baseModelId?: string | null;
+  baseModelEndpoint?: string | null;
+
+  /**
+   * Set only when provider fallback ran the request on an equivalent model from
+   * another provider: the endpoint originally requested. `modelEndpoint` is the
+   * model that actually ran.
+   */
+  requestedModelEndpoint?: string | null;
+
+  metadata?: RequestMetadata;
+
+  /**
+   * Declared by the shared result contract but never populated for webhooks —
+   * output-schema validation must not withhold delivery of a result that has
+   * already been charged for.
+   */
+  validationErrors?: unknown;
+};
+
+/**
+ * The webhook signing secret for the account, as returned by
+ * `modelrunner.webhooks.getSecret()`.
+ */
+export type WebhookSecret = {
+  /** The `whsec_…` secret. Store it like a password. */
+  key: string;
+};
+
+/**
+ * @deprecated This never described a ModelRunner delivery — it is inherited
+ * from a different provider's wire format and no request has ever produced it.
+ * Use {@link WebhookPayload}, and read `billingStatus` rather than `status` to
+ * tell success from failure. Kept only so upgrading does not break compilation;
+ * it will be removed in the next major.
  *
  * @template Payload - The type of the payload in the response. It defaults to `any`,
  * allowing for flexibility in specifying the structure of the payload.

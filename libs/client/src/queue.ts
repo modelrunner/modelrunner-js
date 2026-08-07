@@ -13,13 +13,18 @@ import {
   RequestLog,
   Result,
   RunOptions,
+  WebhookEventName,
 } from "./types/common";
 import { parseEndpointId } from "./utils";
+import { applyWebhook } from "./webhooks";
 
 export type QueuePriority = "low" | "normal";
 export type QueueStatusSubscriptionOptions = QueueStatusOptions &
   QueueModeOptions &
-  Omit<QueueCommonSubscribeOptions, "onEnqueue" | "webhookUrl">;
+  Omit<
+    QueueCommonSubscribeOptions,
+    "onEnqueue" | "webhookUrl" | "webhookEvents"
+  >;
 
 type TimeoutId = ReturnType<typeof setTimeout> | undefined;
 
@@ -94,10 +99,28 @@ type QueueCommonSubscribeOptions = {
   timeout?: number;
 
   /**
-   * The URL to send a webhook notification to when the request is completed.
-   * @see WebHookResponse
+   * The URL to notify when the request reaches one of `webhookEvents`.
+   *
+   * Sent as the reserved `webhook` key at the top level of the request body.
+   * The delivery is signed, and `webhooks.verify` checks that signature — read
+   * it before trusting anything that arrives at this URL.
+   *
+   * @see WebhookPayload
+   * @see WebhooksClient.verify
    */
   webhookUrl?: string;
+
+  /**
+   * Which lifecycle events to notify `webhookUrl` about. Defaults to
+   * `["completed"]`.
+   *
+   * `start` is best effort: a fast request can go straight from `IN_QUEUE` to
+   * `COMPLETED` between two provider polls, in which case only `completed` is
+   * delivered. Requires `webhookUrl`.
+   *
+   * @see WebhookEventName
+   */
+  webhookEvents?: WebhookEventName[];
 
   /**
    * The priority of the request. It defaults to `normal`.
@@ -128,10 +151,28 @@ export type QueueSubscribeOptions = QueueCommonSubscribeOptions &
  */
 export type SubmitOptions<Input> = RunOptions<Input> & {
   /**
-   * The URL to send a webhook notification to when the request is completed.
-   * @see WebHookResponse
+   * The URL to notify when the request reaches one of `webhookEvents`.
+   *
+   * Sent as the reserved `webhook` key at the top level of the request body.
+   * The delivery is signed, and `webhooks.verify` checks that signature — read
+   * it before trusting anything that arrives at this URL.
+   *
+   * @see WebhookPayload
+   * @see WebhooksClient.verify
    */
   webhookUrl?: string;
+
+  /**
+   * Which lifecycle events to notify `webhookUrl` about. Defaults to
+   * `["completed"]`.
+   *
+   * `start` is best effort: a fast request can go straight from `IN_QUEUE` to
+   * `COMPLETED` between two provider polls, in which case only `completed` is
+   * delivered. Requires `webhookUrl`.
+   *
+   * @see WebhookEventName
+   */
+  webhookEvents?: WebhookEventName[];
 
   /**
    * The priority of the request. It defaults to `normal`.
@@ -293,6 +334,7 @@ export const createQueueClient = ({
     ): Promise<InQueueQueueStatus> {
       const {
         webhookUrl,
+        webhookEvents,
         priority,
         hint,
         headers,
@@ -303,7 +345,12 @@ export const createQueueClient = ({
       const input = options.input
         ? await storage.transformInput(options.input)
         : undefined;
-      const body = applyMetadata(input, { metadata, method: options.method });
+      // Both reserved-key groups are merged AFTER the storage transform, so
+      // nothing in them is ever mistaken for a file to upload.
+      const body = applyWebhook(
+        applyMetadata(input, { metadata, method: options.method }),
+        { webhookUrl, webhookEvents, method: options.method },
+      );
       const extraHeaders = Object.fromEntries(
         Object.entries(headers ?? {}).map(([key, value]) => [
           key.toLowerCase(),
@@ -315,7 +362,6 @@ export const createQueueClient = ({
         targetUrl: buildUrl(endpointId, {
           ...runOptions,
           subdomain: "queue",
-          query: webhookUrl ? { modelrunner_webhook: webhookUrl } : undefined,
         }),
         headers: {
           ...extraHeaders,

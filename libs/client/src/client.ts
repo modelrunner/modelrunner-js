@@ -8,6 +8,7 @@ import { createStorageClient, StorageClient } from "./storage";
 import { createStreamingClient, StreamingClient } from "./streaming";
 import { EndpointType, InputType, OutputType } from "./types/client";
 import { Result, RunOptions } from "./types/common";
+import { createWebhooksClient, WebhooksClient } from "./webhooks";
 
 /**
  * The main client type, it provides access to simple API model usage,
@@ -39,6 +40,12 @@ export interface ModelrunnerClient {
    * @see #stream
    */
   readonly streaming: StreamingClient;
+
+  /**
+   * The webhooks client, to manage the account's signing secret and to verify
+   * deliveries sent to a `webhookUrl`.
+   */
+  readonly webhooks: WebhooksClient;
 
   /**
    * Runs a modelrunner endpoint identified by its `endpointId`.
@@ -95,11 +102,13 @@ export function createModelrunnerClient(
   const queue = createQueueClient({ config, storage });
   const streaming = createStreamingClient({ config, storage });
   const realtime = createRealtimeClient({ config });
+  const webhooks = createWebhooksClient({ config });
   return {
     queue,
     realtime,
     storage,
     streaming,
+    webhooks,
     stream: streaming.stream,
     async run<Id extends EndpointType>(
       endpointId: Id,

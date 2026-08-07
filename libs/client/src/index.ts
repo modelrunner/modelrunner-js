@@ -20,9 +20,28 @@ export type {
   QueueStatus,
   RequestMetadata,
   ValidationErrorInfo,
+  WebhookBillingStatus,
+  WebhookEventName,
+  WebhookPayload,
   WebHookResponse,
+  WebhookSecret,
 } from "./types/common";
 export { parseEndpointId } from "./utils";
+export {
+  DEFAULT_TOLERANCE_SECONDS,
+  verifyWebhook,
+  WEBHOOK_EVENTS,
+  WEBHOOK_ID_HEADER,
+  WEBHOOK_SIGNATURE_HEADER,
+  WEBHOOK_TIMESTAMP_HEADER,
+  WEBHOOK_URL_MAX_LENGTH,
+  WebhookVerificationError,
+} from "./webhooks";
+export type {
+  VerifyWebhookOptions,
+  WebhookHeaders,
+  WebhooksClient,
+} from "./webhooks";
 
 type SingletonModelrunnerClient = {
   config(config: Config): void;
@@ -50,6 +69,9 @@ export const modelrunner: SingletonModelrunnerClient =
       },
       get streaming() {
         return currentInstance.streaming;
+      },
+      get webhooks() {
+        return currentInstance.webhooks;
       },
       run<Id extends EndpointType>(id: Id, options: RunOptions<InputType<Id>>) {
         return currentInstance.run<Id>(id, options);
