@@ -41,6 +41,7 @@ export type {
   VerifyWebhookOptions,
   WebhookHeaders,
   WebhooksClient,
+  WebhookSecretOptions,
 } from "./webhooks";
 
 type SingletonModelrunnerClient = {

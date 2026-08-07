@@ -475,7 +475,7 @@ export async function verifyWebhook<Output = any, Input = any>({
 
 // ============== CLIENT ==============
 
-type WebhookSecretOptions = {
+export type WebhookSecretOptions = {
   /** The signal to abort the request. */
   abortSignal?: AbortSignal;
 };
