@@ -25,25 +25,6 @@ export interface StorageSettings {
   expiresIn: ObjectExpiration;
 }
 
-type UploadLifecycleConfig = {
-  /**
-   * Duration in seconds before the object expires and is deleted.
-   * Set to a large value (e.g., 31536000000) for effectively unlimited storage.
-   *
-   * Common values:
-   * - 604800: 7 days
-   * - 2592000: 30 days
-   * - 31536000: 1 year
-   */
-  expiration_duration_seconds?: number;
-
-  /**
-   * Whether to allow I/O storage for this object.
-   * @default undefined (uses account default)
-   */
-  allow_io_storage?: boolean;
-};
-
 const EXPIRATION_VALUES: Record<ObjectExpiration, number | undefined> = {
   never: 3153600000, // 100 years
   immediate: undefined,
@@ -97,8 +78,16 @@ export function buildObjectLifecycleHeaders(
  */
 export type UploadOptions = {
   /**
-   * Custom lifecycle configuration for the uploaded file.
-   * This object will be sent as the X-Modelrunner-Object-Lifecycle header.
+   * How long the uploaded file should be kept before it expires. Sent as the
+   * `X-Modelrunner-Object-Lifecycle-Preference` header, the same one the run and
+   * queue paths use for generated media.
+   *
+   * The countdown starts when the upload is initiated. A file you later pass as
+   * a request input stops expiring — the server will not delete an asset that is
+   * still referenced.
+   *
+   * Applies to single-part uploads (under 90 MB). See the note in
+   * `initiateMultipartUpload` for why larger files do not honour it yet.
    */
   lifecycle?: StorageSettings;
 };
@@ -164,14 +153,11 @@ async function initiateUpload(
   const filename =
     file.name || `${Date.now()}.${getExtensionFromContentType(contentType)}`;
 
-  const headers: Record<string, string> = {};
-  if (lifecycle) {
-    const lifecycleConfig: UploadLifecycleConfig = {
-      expiration_duration_seconds: getExpirationDurationSeconds(lifecycle),
-      allow_io_storage: lifecycle.expiresIn !== "immediate",
-    };
-    headers["X-Modelrunner-Object-Lifecycle"] = JSON.stringify(lifecycleConfig);
-  }
+  // Reuses the exact header the run/queue paths send. This previously sent
+  // `X-Modelrunner-Object-Lifecycle` with an extra `allow_io_storage` field —
+  // a name and shape the API has never read, so an upload TTL was silently
+  // dropped and the file was kept forever.
+  const headers = buildObjectLifecycleHeaders(lifecycle);
 
   return await dispatchRequest<InitiateUploadData, InitiateUploadResult>({
     method: "POST",
@@ -199,10 +185,15 @@ async function initiateMultipartUpload(
   const filename =
     file.name || `${Date.now()}.${getExtensionFromContentType(contentType)}`;
 
-  const headers: Record<string, string> = {};
-  if (lifecycle) {
-    headers["X-Modelrunner-Object-Lifecycle"] = JSON.stringify(lifecycle);
-  }
+  // This used to send `JSON.stringify(lifecycle)` — the raw options object, not
+  // the API's wire shape — under a header name the API does not read.
+  //
+  // ⚠️ Even corrected, a lifecycle on a MULTIPART upload does not take effect
+  // yet: the API creates that file's row when the upload completes, and this
+  // client's complete call goes straight to the presigned URL rather than
+  // through the API, so the header never reaches the point that stamps the
+  // expiry. Single-part uploads (under 90 MB, the common case) do work.
+  const headers = buildObjectLifecycleHeaders(lifecycle);
 
   return await dispatchRequest<InitiateUploadData, InitiateUploadResult>({
     method: "POST",
