@@ -4,7 +4,12 @@ import { createQueueClient, QueueClient, QueueSubscribeOptions } from "./queue";
 import { createRealtimeClient, RealtimeClient } from "./realtime";
 import { buildUrl, dispatchRequest } from "./request";
 import { resultResponseHandler } from "./response";
-import { createStorageClient, StorageClient } from "./storage";
+import {
+  buildObjectLifecycleHeaders,
+  buildStoreIoHeaders,
+  createStorageClient,
+  StorageClient,
+} from "./storage";
 import { createStreamingClient, StreamingClient } from "./streaming";
 import { EndpointType, InputType, OutputType } from "./types/client";
 import { Result, RunOptions } from "./types/common";
@@ -114,7 +119,15 @@ export function createModelrunnerClient(
       endpointId: Id,
       options: RunOptions<InputType<Id>> = {},
     ): Promise<Result<OutputType<Id>>> {
-      const { metadata, ...urlOptions } = options;
+      const { metadata, storageSettings, storeIo, ...urlOptions } = options;
+      // This path never sent either header, so both options were silently
+      // dropped on a direct `run()` while working on the queue path. Built
+      // before `transformInput` so an invalid value fails before the input
+      // Blobs are uploaded.
+      const preferenceHeaders = {
+        ...buildObjectLifecycleHeaders(storageSettings),
+        ...buildStoreIoHeaders(storeIo),
+      };
       const input = options.input
         ? await storage.transformInput(options.input)
         : undefined;
@@ -122,6 +135,7 @@ export function createModelrunnerClient(
       return dispatchRequest<InputType<Id>, Result<OutputType<Id>>>({
         method: options.method,
         targetUrl: buildUrl(endpointId, urlOptions),
+        headers: preferenceHeaders,
         input: body as InputType<Id>,
         config: {
           ...config,

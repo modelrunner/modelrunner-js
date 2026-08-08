@@ -138,4 +138,54 @@ describe("queue.submit metadata", () => {
     ).rejects.toThrow("Invalid metadata");
     expect(dispatchRequest).not.toHaveBeenCalled();
   });
+
+  it("sends the store-io preference alongside the lifecycle header", async () => {
+    const queue = createQueueClient({ config, storage });
+    await queue.submit("swook/inspyrenet", {
+      input: { prompt: "hi" },
+      storageSettings: { expiresIn: "1h" },
+      storeIo: false,
+    });
+
+    const call = (dispatchRequest as jest.Mock).mock.calls[0][0];
+    expect(call.headers).toEqual(
+      expect.objectContaining({
+        "x-modelrunner-store-io": "0",
+        "x-modelrunner-object-lifecycle-preference": JSON.stringify({
+          expiration_duration_seconds: 3600,
+        }),
+      }),
+    );
+  });
+
+  it("leaves both preferences out when neither option is given", async () => {
+    const queue = createQueueClient({ config, storage });
+    await queue.submit("swook/inspyrenet", { input: { prompt: "hi" } });
+
+    const call = (dispatchRequest as jest.Mock).mock.calls[0][0];
+    expect(call.headers).not.toHaveProperty("x-modelrunner-store-io");
+    expect(call.headers).not.toHaveProperty(
+      "x-modelrunner-object-lifecycle-preference",
+    );
+  });
+
+  // The header is built before the input transform, so a bad TTL is caught
+  // before any input Blob has been uploaded — otherwise the caller pays to
+  // upload a 90 MB file and only then gets the RangeError.
+  it("rejects an invalid lifecycle before uploading any input", async () => {
+    const transformInput = jest.fn(async (input: unknown) => input);
+    const queue = createQueueClient({
+      config,
+      storage: { ...storage, transformInput } as StorageClient,
+    });
+
+    await expect(
+      queue.submit("swook/inspyrenet", {
+        input: { prompt: "hi" },
+        storageSettings: { expiresIn: 30 },
+      }),
+    ).rejects.toThrow(RangeError);
+    expect(transformInput).not.toHaveBeenCalled();
+    expect(dispatchRequest).not.toHaveBeenCalled();
+  });
 });

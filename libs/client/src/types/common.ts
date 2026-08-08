@@ -47,6 +47,19 @@ export type RunOptions<Input> = {
   readonly storageSettings?: StorageSettings;
 
   /**
+   * Whether this request's input and output payloads are stored, overriding the
+   * account default. Sent as the `X-Modelrunner-Store-IO` header.
+   *
+   * Set `false` to opt one request out of payload storage, or `true` to opt one
+   * request back in when the account opts out by default. Omit it to leave the
+   * account default in place — `false` and omitted are not the same thing.
+   *
+   * Note this controls storage of the request *payloads*, not the lifetime of
+   * the generated media, which is `storageSettings`.
+   */
+  readonly storeIo?: boolean;
+
+  /**
    * User-defined tags stored alongside the request, which can later be used to
    * filter it. They are never sent to the model and never merged into `input`.
    *

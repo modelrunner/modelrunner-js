@@ -13,7 +13,14 @@ export { ApiError, ValidationError } from "./response";
 export type { ResponseHandler } from "./response";
 export { isRetryableError } from "./retry";
 export type { RetryOptions } from "./retry";
-export type { StorageClient } from "./storage";
+export {
+  MAX_EXPIRATION_SECONDS,
+  MIN_EXPIRATION_SECONDS,
+  OBJECT_LIFECYCLE_PREFERENCE_HEADER,
+  OBJECT_LIFECYCYLE_PREFERENCE_HEADER,
+  STORE_IO_HEADER,
+} from "./storage";
+export type { StorageClient, StorageSettings, UploadOptions } from "./storage";
 export type { ModelrunnerStream, StreamingClient } from "./streaming";
 export * from "./types/common";
 export type {

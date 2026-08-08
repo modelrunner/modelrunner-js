@@ -3,7 +3,11 @@ import { applyMetadata } from "./metadata";
 import { buildUrl, dispatchRequest } from "./request";
 import { resultResponseHandler } from "./response";
 import { DEFAULT_RETRYABLE_STATUS_CODES, RetryOptions } from "./retry";
-import { buildObjectLifecycleHeaders, StorageClient } from "./storage";
+import {
+  buildObjectLifecycleHeaders,
+  buildStoreIoHeaders,
+  StorageClient,
+} from "./storage";
 import { ModelrunnerStream, StreamingConnectionMode } from "./streaming";
 import { EndpointType, InputType, OutputType } from "./types/client";
 import {
@@ -339,9 +343,16 @@ export const createQueueClient = ({
         hint,
         headers,
         storageSettings,
+        storeIo,
         metadata,
         ...runOptions
       } = options;
+      // Built before `transformInput` so an invalid lifecycle or storeIo fails
+      // here rather than after every input Blob has already been uploaded.
+      const preferenceHeaders = {
+        ...buildObjectLifecycleHeaders(storageSettings),
+        ...buildStoreIoHeaders(storeIo),
+      };
       const input = options.input
         ? await storage.transformInput(options.input)
         : undefined;
@@ -365,7 +376,7 @@ export const createQueueClient = ({
         }),
         headers: {
           ...extraHeaders,
-          ...buildObjectLifecycleHeaders(storageSettings),
+          ...preferenceHeaders,
           [QUEUE_PRIORITY_HEADER]: priority ?? "normal",
           ...(hint && { [RUNNER_HINT_HEADER]: hint }),
         },
