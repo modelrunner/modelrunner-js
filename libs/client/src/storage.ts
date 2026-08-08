@@ -1,6 +1,12 @@
 import { getRestApiUrl, RequiredConfig } from "./config";
 import { dispatchRequest } from "./request";
-import { isPlainObject } from "./utils";
+import { ApiError } from "./response";
+import {
+  calculateBackoffDelay,
+  DEFAULT_RETRYABLE_STATUS_CODES,
+  isRetryableError,
+} from "./retry";
+import { isPlainObject, sleep } from "./utils";
 
 type ObjectExpiration =
   | "never"
@@ -12,8 +18,52 @@ type ObjectExpiration =
   | "1y"
   | number;
 
-export const OBJECT_LIFECYCYLE_PREFERENCE_HEADER =
+/** Shortest TTL the API accepts. */
+export const MIN_EXPIRATION_SECONDS = 60;
+
+/** Longest TTL the API accepts, 5 years. */
+export const MAX_EXPIRATION_SECONDS = 157_680_000;
+
+export const OBJECT_LIFECYCLE_PREFERENCE_HEADER =
   "x-modelrunner-object-lifecycle-preference";
+
+/**
+ * @deprecated Misspelled ("LIFECYCYLE"). Use
+ * {@link OBJECT_LIFECYCLE_PREFERENCE_HEADER}. Kept as an alias for one major
+ * version; it holds the same value.
+ */
+export const OBJECT_LIFECYCYLE_PREFERENCE_HEADER =
+  OBJECT_LIFECYCLE_PREFERENCE_HEADER;
+
+/**
+ * Opts a single request in or out of storing its input/output payloads.
+ *
+ * @see buildStoreIoHeaders
+ */
+export const STORE_IO_HEADER = "x-modelrunner-store-io";
+
+/**
+ * Files at or below this size go through the single-part upload; larger ones
+ * use the multipart flow.
+ */
+export const MULTIPART_THRESHOLD_BYTES = 90 * 1024 * 1024;
+
+/**
+ * Size of each multipart part. S3 requires every part except the last to be at
+ * least 5 MiB.
+ */
+const MULTIPART_PART_SIZE_BYTES = 10 * 1024 * 1024;
+
+/** S3 accepts at most 10,000 parts in one multipart upload. */
+const MAX_MULTIPART_PARTS = 10_000;
+
+/**
+ * Status codes worth re-sending a part for. Wider than the client default by
+ * 500: a part PUT is idempotent and S3 documents `InternalError` as retryable,
+ * so re-sending is safe. Anything outside this set — a 403 from an expired
+ * signature, say — will not heal, and retrying only re-transfers the chunk.
+ */
+const PART_RETRYABLE_STATUS_CODES = [...DEFAULT_RETRYABLE_STATUS_CODES, 500];
 
 /**
  * Configuration for object lifecycle and storage behavior.
@@ -25,9 +75,18 @@ export interface StorageSettings {
   expiresIn: ObjectExpiration;
 }
 
-const EXPIRATION_VALUES: Record<ObjectExpiration, number | undefined> = {
-  never: 3153600000, // 100 years
-  immediate: undefined,
+const EXPIRATION_VALUES: Record<
+  Exclude<ObjectExpiration, number>,
+  number | null
+> = {
+  // `null` is the API's documented "no expiration". This used to send 100 years
+  // in seconds, which is over the 5-year maximum, so the request was rejected
+  // outright with a 400.
+  never: null,
+  // The API's floor is 60s — there is no shorter TTL to ask for. This used to
+  // send no header at all, which the platform reads as keep-forever: the exact
+  // opposite of what the caller asked for.
+  immediate: MIN_EXPIRATION_SECONDS,
   "1h": 3600,
   "1d": 86400,
   "7d": 604800,
@@ -35,18 +94,45 @@ const EXPIRATION_VALUES: Record<ObjectExpiration, number | undefined> = {
   "1y": 31536000,
 };
 
+function describeAllowedExpirations(): string {
+  return (
+    `one of ${Object.keys(EXPIRATION_VALUES).join(", ")}, or a whole number ` +
+    `of seconds between ${MIN_EXPIRATION_SECONDS} and ${MAX_EXPIRATION_SECONDS}`
+  );
+}
+
 /**
- * Converts an `StorageSettings` to the expiration duration in seconds.
+ * Converts a `StorageSettings` to the expiration duration in seconds.
+ *
  * @param lifecycle the lifecycle preference
- * @returns the expiration duration in seconds, or undefined if not applicable
+ * @returns the duration in seconds, or `null` for "keep forever"
+ * @throws RangeError if the value is outside what the API accepts, so a bad TTL
+ * fails here rather than as a 400 after the bytes have been uploaded
  */
 export function getExpirationDurationSeconds(
   lifecycle: StorageSettings,
-): number | undefined {
+): number | null {
   const { expiresIn } = lifecycle;
-  return typeof expiresIn === "number"
-    ? expiresIn
-    : EXPIRATION_VALUES[expiresIn];
+
+  if (typeof expiresIn === "number") {
+    if (
+      !Number.isInteger(expiresIn) ||
+      expiresIn < MIN_EXPIRATION_SECONDS ||
+      expiresIn > MAX_EXPIRATION_SECONDS
+    ) {
+      throw new RangeError(
+        `Invalid expiresIn: ${expiresIn}. Expected ${describeAllowedExpirations()}.`,
+      );
+    }
+    return expiresIn;
+  }
+
+  if (!(expiresIn in EXPIRATION_VALUES)) {
+    throw new RangeError(
+      `Invalid expiresIn: ${String(expiresIn)}. Expected ${describeAllowedExpirations()}.`,
+    );
+  }
+  return EXPIRATION_VALUES[expiresIn];
 }
 
 /**
@@ -62,14 +148,71 @@ export function buildObjectLifecycleHeaders(
   if (!lifecycle) {
     return {};
   }
-  const expirationDurationSeconds = getExpirationDurationSeconds(lifecycle);
-  if (expirationDurationSeconds === undefined) {
+  // Always sent once a lifecycle is given, including the `null` that means
+  // "keep forever" — omitting the header instead would silently fall back to
+  // the account default, which is not the same thing.
+  return {
+    [OBJECT_LIFECYCLE_PREFERENCE_HEADER]: JSON.stringify({
+      expiration_duration_seconds: getExpirationDurationSeconds(lifecycle),
+    }),
+  };
+}
+
+/**
+ * Builds the header that opts a single request in or out of storing its
+ * input/output payloads, overriding the account default.
+ *
+ * The API parses this as a strict enum (`"0" | "1" | "true" | "false" | "TRUE"
+ * | "FALSE"`) and rejects anything else, so a non-boolean is caught here rather
+ * than coming back as a 400.
+ *
+ * @param storeIo `false` to opt out, `true` to opt in, `undefined` to leave the
+ * account default in place
+ * @returns a record with the `X-Modelrunner-Store-IO` header, or `{}`
+ * @throws TypeError if `storeIo` is neither a boolean nor `undefined`
+ */
+export function buildStoreIoHeaders(
+  storeIo: boolean | undefined,
+): Record<string, string> {
+  if (storeIo === undefined) {
     return {};
   }
+  if (typeof storeIo !== "boolean") {
+    throw new TypeError(
+      `Invalid storeIo: ${JSON.stringify(storeIo)}. Expected a boolean.`,
+    );
+  }
+  // "1" is what the API reads as "store" — not a guess about an undocumented
+  // direction. Without it, an account that opts out by default could never opt
+  // a single request back in.
+  return { [STORE_IO_HEADER]: storeIo ? "1" : "0" };
+}
+
+/**
+ * Content type whose presigned PUT is signed with an extra
+ * `Content-Disposition`, which the upload has to repeat verbatim.
+ */
+const CONTENT_DISPOSITION_SIGNED_TYPES = new Map([
+  // The API forces SVG to download rather than render on the media domain, so a
+  // crafted file cannot run its inline <script> as same-site script. That header
+  // is part of the signature, so omitting it here fails with
+  // `SignatureDoesNotMatch`.
+  ["image/svg+xml", "attachment"],
+]);
+
+/**
+ * The headers a presigned object PUT must carry for its signature to match.
+ *
+ * The content type is matched exactly, mirroring the API's own
+ * `contentType === "image/svg+xml"` check: a type carrying parameters
+ * (`image/svg+xml;charset=utf-8`) is not signed with a disposition there, so
+ * sending one here would break the signature just as surely as omitting it.
+ */
+function buildPresignedPutHeaders(contentType: string): Record<string, string> {
+  const contentDisposition = CONTENT_DISPOSITION_SIGNED_TYPES.get(contentType);
   return {
-    [OBJECT_LIFECYCYLE_PREFERENCE_HEADER]: JSON.stringify({
-      expiration_duration_seconds: expirationDurationSeconds,
-    }),
+    "Content-Type": contentType,
+    ...(contentDisposition && { "Content-Disposition": contentDisposition }),
   };
 }
 
@@ -86,8 +229,8 @@ export type UploadOptions = {
    * a request input stops expiring — the server will not delete an asset that is
    * still referenced.
    *
-   * Applies to single-part uploads (under 90 MB). See the note in
-   * `initiateMultipartUpload` for why larger files do not honour it yet.
+   * Honoured by both upload paths: single-part records the expiry when the
+   * upload is initiated, multipart when it completes.
    */
   lifecycle?: StorageSettings;
 };
@@ -137,7 +280,10 @@ type InitiateUploadData = {
  */
 function getExtensionFromContentType(contentType: string): string {
   const [, fileType] = contentType.split("/");
-  return fileType.split(/[-;]/)[0] ?? "bin";
+  // Optional on `fileType`, not on the split result: a content type with no
+  // slash at all (`"binary"`) leaves it undefined, which used to throw here
+  // rather than fall back to `bin` as intended.
+  return fileType?.split(/[-;]/)[0] ?? "bin";
 }
 
 /**
@@ -172,68 +318,168 @@ async function initiateUpload(
   });
 }
 
+type InitiateMultipartUploadResult = {
+  /**
+   * The public alias URL the file will be readable at. Note this is NOT the URL
+   * `/storage/upload/complete` returns — see `multipartUpload`.
+   */
+  fileUrl: string;
+  uploadId: string;
+  uploadKey: string;
+};
+
+type MultipartPart = {
+  partNumber: number;
+  etag: string;
+};
+
 /**
- * Initiate the multipart upload of a file to the server. This returns the URL to upload
- * the file to and the URL of the file once it is uploaded.
+ * Initiate a multipart upload. Returns the handles (`uploadId`, `uploadKey`)
+ * that the per-part and completion calls are addressed with.
  */
 async function initiateMultipartUpload(
   file: Blob,
   config: RequiredConfig,
   contentType: string,
   lifecycle?: StorageSettings,
-): Promise<InitiateUploadResult> {
+): Promise<InitiateMultipartUploadResult> {
   const filename =
     file.name || `${Date.now()}.${getExtensionFromContentType(contentType)}`;
 
-  // This used to send `JSON.stringify(lifecycle)` — the raw options object, not
-  // the API's wire shape — under a header name the API does not read.
-  //
-  // ⚠️ Even corrected, a lifecycle on a MULTIPART upload does not take effect
-  // yet: the API creates that file's row when the upload completes, and this
-  // client's complete call goes straight to the presigned URL rather than
-  // through the API, so the header never reaches the point that stamps the
-  // expiry. Single-part uploads (under 90 MB, the common case) do work.
+  // The API reads the lifecycle header on `/complete` for multipart, not here —
+  // that is where the `files` row is created. It is sent on both calls so the
+  // preference still lands if the stamping point ever moves to the initiate.
   const headers = buildObjectLifecycleHeaders(lifecycle);
 
-  return await dispatchRequest<InitiateUploadData, InitiateUploadResult>({
+  const result = await dispatchRequest<
+    InitiateUploadData & { size: number },
+    InitiateMultipartUploadResult
+  >({
     method: "POST",
     targetUrl: `${getRestApiUrl()}/storage/upload/initiate-multipart`,
     input: {
       content_type: contentType,
       file_name: filename,
+      size: file.size,
     },
     config,
     headers,
   });
+
+  // Fail here with something actionable rather than downstream on a `undefined`
+  // upload handle.
+  if (!result?.uploadId || !result?.uploadKey || !result?.fileUrl) {
+    throw new Error(
+      "Multipart upload could not be initiated: the response is missing " +
+        "`uploadId`, `uploadKey` or `fileUrl`.",
+    );
+  }
+  return result;
 }
 
-type MultipartObject = {
-  partNumber: number;
-  etag: string;
-};
+/**
+ * Get the presigned URL for a single part. Each part is signed on demand rather
+ * than derived from a base URL — only the API can sign them.
+ */
+async function getMultipartPartUrl(
+  config: RequiredConfig,
+  { uploadKey, uploadId }: InitiateMultipartUploadResult,
+  partNumber: number,
+): Promise<string> {
+  const query = new URLSearchParams({
+    uploadKey,
+    uploadId,
+    partNumber: String(partNumber),
+  });
+  const { presignedUrl } = await dispatchRequest<
+    never,
+    { presignedUrl: string }
+  >({
+    method: "GET",
+    targetUrl: `${getRestApiUrl()}/storage/upload/multipart-url?${query}`,
+    config,
+  });
+  return presignedUrl;
+}
 
-async function partUploadRetries(
+/**
+ * PUT one part to its presigned URL and return the ETag S3 assigned it, which
+ * the completion call needs to reassemble the object.
+ */
+async function uploadPart(
   uploadUrl: string,
   chunk: Blob,
+  partNumber: number,
   config: RequiredConfig,
   tries = 3,
-): Promise<MultipartObject> {
-  if (tries === 0) {
-    throw new Error("Part upload failed, retries exhausted");
+): Promise<MultipartPart> {
+  const { fetch, retry } = config;
+  let lastError: unknown;
+  let response: Response | undefined;
+
+  for (let attempt = 0; attempt < tries; attempt++) {
+    try {
+      // No `Content-Type`: the part URL is signed without one, and the sliced
+      // chunk carries no type, so fetch omits the header.
+      const attemptResponse = await fetch(uploadUrl, {
+        method: "PUT",
+        body: chunk,
+      });
+      if (!attemptResponse.ok) {
+        throw new ApiError({
+          message: `Failed to upload part ${partNumber}: HTTP ${attemptResponse.status} ${attemptResponse.statusText}`,
+          status: attemptResponse.status,
+        });
+      }
+      response = attemptResponse;
+      break;
+    } catch (error) {
+      lastError = error;
+      // A 403 from an expired signature will not heal, so re-sending 10 MiB
+      // twice more only wastes the caller's bandwidth. A non-`ApiError` is a
+      // network-level failure, which is exactly what retrying is for.
+      const retryable =
+        !(error instanceof ApiError) ||
+        isRetryableError(error, PART_RETRYABLE_STATUS_CODES);
+      if (!retryable) {
+        throw error;
+      }
+      // Back off before re-sending the chunk; hammering a transient 503 with
+      // 10 MiB immediately is what the delay exists to avoid.
+      if (attempt < tries - 1) {
+        await sleep(
+          calculateBackoffDelay(
+            attempt,
+            retry.baseDelay,
+            retry.maxDelay,
+            retry.backoffMultiplier,
+            retry.enableJitter,
+          ),
+        );
+      }
+    }
   }
 
-  const { fetch, responseHandler } = config;
-
-  try {
-    const response = await fetch(uploadUrl, {
-      method: "PUT",
-      body: chunk,
-    });
-
-    return (await responseHandler(response)) as MultipartObject;
-  } catch (error) {
-    return await partUploadRetries(uploadUrl, chunk, config, tries - 1);
+  if (!response) {
+    // Surface the real failure instead of a generic "retries exhausted".
+    throw lastError;
   }
+
+  // S3 answers a part upload with an empty body and the ETag in a header, so
+  // this is read off the headers rather than parsed from the body. Checked
+  // outside the retry loop: a missing ETag means the bucket's CORS policy does
+  // not expose it, which will not change between attempts, so retrying would
+  // re-transfer the chunk for nothing.
+  const etag = response.headers.get("ETag") ?? response.headers.get("etag");
+  if (!etag) {
+    throw new Error(
+      `Part ${partNumber} uploaded but no ETag was returned. In a browser this ` +
+        "usually means the storage bucket's CORS policy does not list ETag " +
+        "under Access-Control-Expose-Headers.",
+    );
+  }
+  // S3 quotes the ETag; the API expects it bare.
+  return { partNumber, etag: etag.replace(/"/g, "") };
 }
 
 async function multipartUpload(
@@ -241,49 +487,67 @@ async function multipartUpload(
   config: RequiredConfig,
   lifecycle?: StorageSettings,
 ): Promise<string> {
-  const { fetch, responseHandler } = config;
   const contentType = file.type || "application/octet-stream";
-  const { upload_url: uploadUrl, file_url: url } =
-    await initiateMultipartUpload(file, config, contentType, lifecycle);
 
-  // Break the file into 10MB chunks
-  const chunkSize = 10 * 1024 * 1024;
-  const chunks = Math.ceil(file.size / chunkSize);
-
-  const parsedUrl = new URL(uploadUrl);
-
-  const responses: MultipartObject[] = [];
-
-  for (let i = 0; i < chunks; i++) {
-    const start = i * chunkSize;
-    const end = Math.min(start + chunkSize, file.size);
-
-    const chunk = file.slice(start, end);
-
-    const partNumber = i + 1;
-    // {uploadUrl}/{part_number}?uploadUrlParams=...
-    const partUploadUrl = `${parsedUrl.origin}${parsedUrl.pathname}/${partNumber}${parsedUrl.search}`;
-
-    responses.push(await partUploadRetries(partUploadUrl, chunk, config));
+  // Checked before initiating: an upload started here could not be aborted, and
+  // the failure would otherwise surface only after transferring ~100 GiB.
+  const partCount = Math.ceil(file.size / MULTIPART_PART_SIZE_BYTES);
+  if (partCount > MAX_MULTIPART_PARTS) {
+    throw new RangeError(
+      `File is too large to upload: ${file.size} bytes needs ${partCount} parts, ` +
+        `over the ${MAX_MULTIPART_PARTS}-part limit.`,
+    );
   }
 
-  // Complete the upload
-  const completeUrl = `${parsedUrl.origin}${parsedUrl.pathname}/complete${parsedUrl.search}`;
-  const response = await fetch(completeUrl, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      parts: responses.map((mpart) => ({
-        partNumber: mpart.partNumber,
-        etag: mpart.etag,
-      })),
-    }),
-  });
-  await responseHandler(response);
+  const upload = await initiateMultipartUpload(
+    file,
+    config,
+    contentType,
+    lifecycle,
+  );
 
-  return url;
+  const parts: MultipartPart[] = [];
+
+  for (let i = 0; i < partCount; i++) {
+    const start = i * MULTIPART_PART_SIZE_BYTES;
+    const end = Math.min(start + MULTIPART_PART_SIZE_BYTES, file.size);
+    const partNumber = i + 1;
+
+    const presignedUrl = await getMultipartPartUrl(config, upload, partNumber);
+    parts.push(
+      await uploadPart(
+        presignedUrl,
+        file.slice(start, end),
+        partNumber,
+        config,
+      ),
+    );
+  }
+
+  // Completion goes through the API rather than straight to the presigned host.
+  // That is what makes the lifecycle preference stick: the API creates the
+  // `files` row here and stamps its expiry from this header. Posting to the
+  // presigned URL — as this client used to — skips that entirely and the
+  // requested TTL is silently lost.
+  await dispatchRequest<
+    { uploadId: string; uploadKey: string; parts: MultipartPart[] },
+    { fileUrl: string }
+  >({
+    method: "POST",
+    targetUrl: `${getRestApiUrl()}/storage/upload/complete`,
+    input: {
+      uploadId: upload.uploadId,
+      uploadKey: upload.uploadKey,
+      parts,
+    },
+    config,
+    headers: buildObjectLifecycleHeaders(lifecycle),
+  });
+
+  // Deliberately the URL from *initiate*, not the one `/complete` returns: that
+  // one is the bucket-native S3 Location, which is not publicly readable and
+  // does not match the `files` row, which is keyed by this alias URL.
+  return upload.fileUrl;
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -300,8 +564,7 @@ export function createStorageClient({
     upload: async (file: Blob, options?: UploadOptions) => {
       const lifecycle = options?.lifecycle;
 
-      // Check for 90+ MB file size to do multipart upload
-      if (file.size > 90 * 1024 * 1024) {
+      if (file.size > MULTIPART_THRESHOLD_BYTES) {
         return await multipartUpload(file, config, lifecycle);
       }
 
@@ -317,9 +580,10 @@ export function createStorageClient({
       const response = await fetch(uploadUrl, {
         method: "PUT",
         body: file,
-        headers: {
-          "Content-Type": file.type || "application/octet-stream",
-        },
+        // Built from the same `contentType` that was sent to initiate — the
+        // signature covers what the API signed, which for a typeless Blob is
+        // the substituted `application/octet-stream`, not `file.type`.
+        headers: buildPresignedPutHeaders(contentType),
       });
       await responseHandler(response);
       return url;
