@@ -103,7 +103,7 @@ export async function dispatchRequest<Input, Output>(
         attempt === retryOptions.maxRetries ||
         !isRetryableError(error, retryOptions.retryableStatusCodes) ||
         options.signal?.aborted;
-      if (!shouldNotRetry) {
+      if (shouldNotRetry) {
         throw error;
       }
 
