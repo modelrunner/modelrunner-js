@@ -27,7 +27,7 @@ export type Config = {
    * client in the browser, it's recommended to use a proxy server to avoid
    * exposing the credentials in the client's environment.
    *
-   * By default it tries to use the `MODEL_RUNNER_KEY` environment variable, when
+   * By default it tries to use the `MODELRUNNER_KEY` environment variable, when
    * `process.env` is defined.
    *
    * @see https://modelrunner.ai/docs/model-endpoints/server-side
@@ -70,33 +70,42 @@ export type Config = {
 export type RequiredConfig = Required<Config>;
 
 /**
- * Checks if the required MODEL_RUNNER environment variables are set.
+ * Reads the credentials from the environment.
  *
- * @returns `true` if the required environment variables are set,
- * `false` otherwise.
+ * `MODELRUNNER_*` is the canonical spelling across the platform — it's what the
+ * proxy, the Python SDK and every doc use. The `MODEL_RUNNER_*` spelling is only
+ * ever read by this client, so it's kept as a fallback for anyone who worked
+ * around the mismatch before it was fixed.
+ *
+ * Each `process.env.NAME` is written out in full rather than read through a
+ * local alias or a computed key: bundlers that inline environment variables
+ * (webpack's DefinePlugin, esbuild/Vite `define`, Next.js) substitute that exact
+ * member expression and nothing else, so anything shorter breaks them.
+ *
+ * An empty value falls through to the next candidate — a blank `.env` entry is
+ * a variable nobody filled in, not a credential, and letting it win would send
+ * an empty key and reproduce the very 401 this resolution order exists to fix.
  */
-function hasEnvVariables(): boolean {
-  return (
-    typeof process !== "undefined" &&
-    process.env &&
-    (typeof process.env.MODEL_RUNNER_KEY !== "undefined" ||
-      (typeof process.env.MODEL_RUNNER_KEY_ID !== "undefined" &&
-        typeof process.env.MODEL_RUNNER_KEY_SECRET !== "undefined"))
-  );
+function credentialsFromProcessEnv(): {
+  key?: string;
+  keyId?: string;
+  keySecret?: string;
+} {
+  if (typeof process === "undefined" || !process.env) {
+    return {};
+  }
+  return {
+    key: process.env.MODELRUNNER_KEY || process.env.MODEL_RUNNER_KEY,
+    keyId: process.env.MODELRUNNER_KEY_ID || process.env.MODEL_RUNNER_KEY_ID,
+    keySecret:
+      process.env.MODELRUNNER_KEY_SECRET || process.env.MODEL_RUNNER_KEY_SECRET,
+  };
 }
 
 export const credentialsFromEnv: CredentialsResolver = () => {
-  if (!hasEnvVariables()) {
-    return undefined;
-  }
+  const { key, keyId, keySecret } = credentialsFromProcessEnv();
 
-  if (typeof process.env.MODEL_RUNNER_KEY !== "undefined") {
-    return process.env.MODEL_RUNNER_KEY;
-  }
-
-  return process.env.MODEL_RUNNER_KEY_ID
-    ? `${process.env.MODEL_RUNNER_KEY_ID}:${process.env.MODEL_RUNNER_KEY_SECRET}`
-    : undefined;
+  return key || (keyId && keySecret ? `${keyId}:${keySecret}` : undefined);
 };
 
 const DEFAULT_CONFIG: Partial<Config> = {
