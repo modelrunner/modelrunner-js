@@ -42,7 +42,7 @@ export type RunOptions<Input> = {
    * (images, files, etc.) remain available before expiring.
    *
    * @see StorageSettings
-   * @see https://docs.modelrunner.ai/clients/js-client#object-lifecycle
+   * @see https://modelrunner.ai/docs/clients/js-client#object-lifecycle
    */
   readonly storageSettings?: StorageSettings;
 
