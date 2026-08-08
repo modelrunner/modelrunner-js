@@ -7,6 +7,7 @@
     "*.spec.ts",
     "./libs/client/src/types/endpoints.ts"
   ],
+  "gitRevision": "main",
   "excludeExternals": true,
   "excludeInternal": false,
   "includeVersion": false,
