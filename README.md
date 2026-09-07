@@ -13,6 +13,10 @@ The modelrunner JavaScript/TypeScript Client is a robust and user-friendly libra
 
 The `modelrunner` library serves as a client for modelrunner apps hosted on modelrunner. For guidance on consuming and creating apps, refer to the [quickstart guide](https://modelrunner.ai/docs).
 
+> **Maintaining an open-source project?** ModelRunner gives active open-source
+> projects free monthly API credits — apply at
+> [modelrunner.ai/oss-program](https://modelrunner.ai/oss-program).
+
 ### Client Library
 
 This client library is crafted as a lightweight layer atop platform standards like `fetch`. This ensures a hassle-free integration into your existing codebase. Moreover, it addresses platform disparities, guaranteeing flawless operation across various JavaScript runtimes.
