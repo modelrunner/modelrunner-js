@@ -26,27 +26,40 @@ This client library is crafted as a lightweight layer atop platform standards li
 
 1. Install the client library
    ```sh
-   npm install --save modelrunner
+   npm install --save @modelrunner/client
    ```
-2. Start by configuring your credentials:
+2. Set your API key. The client reads `MODELRUNNER_KEY` from the environment automatically, so on the server this is usually all you need:
+
+   ```sh
+   export MODELRUNNER_KEY="your-api-key"
+   ```
+
+   To pass it explicitly instead, give `config` the key itself — not the name of the variable:
 
    ```ts
    import { modelrunner } from "@modelrunner/client";
 
    modelrunner.config({
-     // Can also be auto-configured using environment variables:
-     credentials: "MODELRUNNER_KEY",
+     credentials: process.env.MODELRUNNER_KEY,
    });
    ```
 
-3. Retrieve your function id and execute it:
+3. Run a model by its endpoint id, passing the model's input:
+
    ```ts
-   const result = await modelrunner.run("user/app-alias");
+   const result = await modelrunner.subscribe("owner/model-alias", {
+     input: { prompt: "a red panda reading a book" },
+   });
+
+   console.log(result.data);
    ```
 
-The result's type is contingent upon your Python function's output. Types in Python are mapped to their corresponding types in JavaScript.
+`subscribe` submits the request to the queue and resolves once it completes, which is what you want for most
+models. `run` is also available and blocks on a single HTTP request — avoid it for anything slow, since the
+result is lost if the connection drops.
 
-See the available [model APIs](https://modelrunner.ai/models) for more details.
+The shape of `result.data` is defined by the model you called. Each model's inputs and outputs are documented
+on its own page in the [model catalog](https://modelrunner.ai/models).
 
 ### The modelrunner client proxy
 
