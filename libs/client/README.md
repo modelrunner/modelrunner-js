@@ -125,3 +125,7 @@ Both the old and the new secret are signed with for **24 hours** afterwards, so 
 ## More features
 
 The client library offers a plethora of features designed to simplify your journey with `modelrunner.ai`. Dive into the [official documentation](https://modelrunner.ai/docs) for a comprehensive guide.
+
+## Saved character references (unreleased)
+
+Queue submission/subscription supports explicit, version-bound character selections. See the [character guide](https://modelrunner.ai/docs/guides/characters). The client checks enabled contract v1 before uploads, keeps bindings out of model input, and attempts each referenced submission POST once (including transport errors and HTTP redirects). Read-only polling retains its retries. After an uncertain outcome, inspect request history before submitting again. This option is not present in older published releases.

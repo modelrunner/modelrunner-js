@@ -1,5 +1,9 @@
 import { createParser } from "eventsource-parser";
 import { getTemporaryAuthToken } from "./auth";
+import {
+  rejectNonQueueCharacterReferences,
+  rejectRawCharacterReferences,
+} from "./character-references";
 import { RequiredConfig } from "./config";
 import { applyMetadata } from "./metadata";
 import { buildUrl, dispatchRequest } from "./request";
@@ -440,6 +444,8 @@ export function createStreamingClient({
       endpointId: Id,
       options: StreamOptions<InputType<Id>>,
     ) {
+      rejectNonQueueCharacterReferences(options);
+      rejectRawCharacterReferences(options.input);
       const { metadata, ...streamOptions } = options;
       const input = options.input
         ? await storage.transformInput(options.input)

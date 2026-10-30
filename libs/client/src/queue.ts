@@ -1,3 +1,9 @@
+import {
+  CharacterReferenceOptions,
+  copyCharacterReferences,
+  rejectRawCharacterReferences,
+  requireCharacterReferenceSupport,
+} from "./character-references";
 import { RequiredConfig } from "./config";
 import { applyMetadata } from "./metadata";
 import { buildUrl, dispatchRequest } from "./request";
@@ -59,7 +65,7 @@ type QueueModeOptions =
       connectionMode?: StreamingConnectionMode;
     };
 
-type QueueCommonSubscribeOptions = {
+type QueueCommonSubscribeOptions = CharacterReferenceOptions & {
   /**
    * The mode to use for subscribing to updates. It defaults to `polling`.
    * You can also use client-side streaming by setting it to `streaming`.
@@ -153,55 +159,56 @@ export type QueueSubscribeOptions = QueueCommonSubscribeOptions &
 /**
  * Options for submitting a request to the queue.
  */
-export type SubmitOptions<Input> = RunOptions<Input> & {
-  /**
-   * The URL to notify when the request reaches one of `webhookEvents`.
-   *
-   * Sent as the reserved `webhook` key at the top level of the request body.
-   * The delivery is signed, and `webhooks.verify` checks that signature — read
-   * it before trusting anything that arrives at this URL.
-   *
-   * @see WebhookPayload
-   * @see WebhooksClient.verify
-   */
-  webhookUrl?: string;
+export type SubmitOptions<Input> = RunOptions<Input> &
+  CharacterReferenceOptions & {
+    /**
+     * The URL to notify when the request reaches one of `webhookEvents`.
+     *
+     * Sent as the reserved `webhook` key at the top level of the request body.
+     * The delivery is signed, and `webhooks.verify` checks that signature — read
+     * it before trusting anything that arrives at this URL.
+     *
+     * @see WebhookPayload
+     * @see WebhooksClient.verify
+     */
+    webhookUrl?: string;
 
-  /**
-   * Which lifecycle events to notify `webhookUrl` about. Defaults to
-   * `["completed"]`.
-   *
-   * `start` is best effort: a fast request can go straight from `IN_QUEUE` to
-   * `COMPLETED` between two provider polls, in which case only `completed` is
-   * delivered. Requires `webhookUrl`.
-   *
-   * @see WebhookEventName
-   */
-  webhookEvents?: WebhookEventName[];
+    /**
+     * Which lifecycle events to notify `webhookUrl` about. Defaults to
+     * `["completed"]`.
+     *
+     * `start` is best effort: a fast request can go straight from `IN_QUEUE` to
+     * `COMPLETED` between two provider polls, in which case only `completed` is
+     * delivered. Requires `webhookUrl`.
+     *
+     * @see WebhookEventName
+     */
+    webhookEvents?: WebhookEventName[];
 
-  /**
-   * The priority of the request. It defaults to `normal`.
-   * This will be sent as the `x-modelrunner-queue-priority` header.
-   *
-   * @see QueuePriority
-   */
-  priority?: QueuePriority;
+    /**
+     * The priority of the request. It defaults to `normal`.
+     * This will be sent as the `x-modelrunner-queue-priority` header.
+     *
+     * @see QueuePriority
+     */
+    priority?: QueuePriority;
 
-  /**
-   * A hint for the runner to use when processing the request.
-   * This will be sent as the `x-modelrunner-hint` header.
-   */
-  hint?: string;
+    /**
+     * A hint for the runner to use when processing the request.
+     * This will be sent as the `x-modelrunner-hint` header.
+     */
+    hint?: string;
 
-  /**
-   * Additional HTTP headers to include in the submit request.
-   *
-   * Note: `priority`, `hint`, and `objectLifecycle` will override the following headers:
-   *  - `x-modelrunner-queue-priority`
-   *  - `x-modelrunner-hint`
-   *  - `x-modelrunner-object-lifecycle-preference`
-   */
-  headers?: Record<string, string>;
-};
+    /**
+     * Additional HTTP headers to include in the submit request.
+     *
+     * Note: `priority`, `hint`, and `objectLifecycle` will override the following headers:
+     *  - `x-modelrunner-queue-priority`
+     *  - `x-modelrunner-hint`
+     *  - `x-modelrunner-object-lifecycle-preference`
+     */
+    headers?: Record<string, string>;
+  };
 
 type BaseQueueOptions = {
   /**
@@ -336,7 +343,22 @@ export const createQueueClient = ({
       endpointId: string,
       options: SubmitOptions<Input>,
     ): Promise<InQueueQueueStatus> {
+      rejectRawCharacterReferences(options.input);
+      const bindings = copyCharacterReferences(options.references);
+      if (bindings) {
+        if (
+          (options.method ?? "post").toLowerCase() !== "post" ||
+          (options as { path?: string }).path
+        )
+          throw new Error("Character references require a direct queue POST.");
+        await requireCharacterReferenceSupport(
+          config,
+          endpointId,
+          options.abortSignal,
+        );
+      }
       const {
+        references: _references,
         webhookUrl,
         webhookEvents,
         priority,
@@ -358,10 +380,13 @@ export const createQueueClient = ({
         : undefined;
       // Both reserved-key groups are merged AFTER the storage transform, so
       // nothing in them is ever mistaken for a file to upload.
-      const body = applyWebhook(
+      const ordinaryBody = applyWebhook(
         applyMetadata(input, { metadata, method: options.method }),
         { webhookUrl, webhookEvents, method: options.method },
       );
+      const body = bindings
+        ? { ...ordinaryBody, modelrunner_references: bindings }
+        : ordinaryBody;
       const extraHeaders = Object.fromEntries(
         Object.entries(headers ?? {}).map(([key, value]) => [
           key.toLowerCase(),
@@ -384,7 +409,8 @@ export const createQueueClient = ({
         config,
         options: {
           signal: options.abortSignal,
-          retry: QUEUE_RETRY_CONFIG,
+          ...(bindings ? { redirect: "error" as const } : {}),
+          retry: bindings ? { maxRetries: 0 } : QUEUE_RETRY_CONFIG,
         },
       });
     },

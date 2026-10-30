@@ -1,3 +1,7 @@
+import {
+  rejectNonQueueCharacterReferences,
+  rejectRawCharacterReferences,
+} from "./character-references";
 import { Config, createConfig } from "./config";
 import { applyMetadata } from "./metadata";
 import { createQueueClient, QueueClient, QueueSubscribeOptions } from "./queue";
@@ -119,6 +123,8 @@ export function createModelrunnerClient(
       endpointId: Id,
       options: RunOptions<InputType<Id>> = {},
     ): Promise<Result<OutputType<Id>>> {
+      rejectNonQueueCharacterReferences(options);
+      rejectRawCharacterReferences(options.input);
       const { metadata, storageSettings, storeIo, ...urlOptions } = options;
       // This path never sent either header, so both options were silently
       // dropped on a direct `run()` while working on the queue path. Built

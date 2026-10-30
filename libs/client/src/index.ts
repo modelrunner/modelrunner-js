@@ -98,3 +98,8 @@ export const modelrunner: SingletonModelrunnerClient =
       },
     } satisfies SingletonModelrunnerClient;
   })();
+
+export type {
+  CharacterReferenceBinding,
+  CharacterReferenceOptions,
+} from "./character-references";
