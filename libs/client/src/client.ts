@@ -3,6 +3,7 @@ import {
   rejectRawCharacterReferences,
 } from "./character-references";
 import { Config, createConfig } from "./config";
+import { createEntitiesClient, EntitiesClient } from "./entities";
 import { applyMetadata } from "./metadata";
 import { createQueueClient, QueueClient, QueueSubscribeOptions } from "./queue";
 import { createRealtimeClient, RealtimeClient } from "./realtime";
@@ -30,6 +31,9 @@ export interface ModelrunnerClient {
    * The queue client to interact with the queue API.
    */
   readonly queue: QueueClient;
+
+  /** Saved Entity CRUD and authenticated owner capabilities. */
+  readonly entities: EntitiesClient;
 
   /**
    * The realtime client to interact with the realtime API
@@ -107,6 +111,7 @@ export function createModelrunnerClient(
   userConfig: Config = {},
 ): ModelrunnerClient {
   const config = createConfig(userConfig);
+  const entities = createEntitiesClient({ config });
   const storage = createStorageClient({ config });
   const queue = createQueueClient({ config, storage });
   const streaming = createStreamingClient({ config, storage });
@@ -114,6 +119,7 @@ export function createModelrunnerClient(
   const webhooks = createWebhooksClient({ config });
   return {
     queue,
+    entities,
     realtime,
     storage,
     streaming,

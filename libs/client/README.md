@@ -160,3 +160,28 @@ with compatible older servers. `CharacterReferenceBinding` and
 `entityReferences` metadata plus authenticated owner eligibility; the SDK refuses
 an older or disabled server before uploads. Do not put the reserved binding key
 inside `input`, or send references through `run`/`stream`.
+
+### Manage the saved library
+
+```javascript
+const { items, counts } = await modelrunner.entities.list({ type: "prop" });
+const { handle, available } = await modelrunner.entities.checkHandle({ name: "Brass lantern" });
+const entity = await modelrunner.entities.create({
+  type: "prop", name: "Brass lantern", handle,
+  fileIds: [ownedFileId], description: "Brass body and a red leather strap",
+});
+const updated = await modelrunner.entities.update(entity.id, {
+  version: entity.version, description: "Brass body and a blue leather strap",
+});
+// await modelrunner.entities.get(entity.id);
+// await modelrunner.entities.delete(entity.id);
+```
+
+Library helpers use owned ready File IDs. The API remains responsible for readiness,
+ownership, kind admission and version checks. Writes are single attempts and refuse
+redirects; after an uncertain create, reconcile owner reads before creating again.
+Deleting an Entity keeps its Files and historical Requests. Missing update fields
+are preserved; a conflicting version returns 409. Check availability before create,
+while still handling a concurrent conflict. Availability does not reserve a handle.
+
+Use `entities.capabilities()` for account admission.

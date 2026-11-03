@@ -69,6 +69,9 @@ export const modelrunner: SingletonModelrunnerClient =
       get queue() {
         return currentInstance.queue;
       },
+      get entities() {
+        return currentInstance.entities;
+      },
       get realtime() {
         return currentInstance.realtime;
       },
@@ -109,3 +112,17 @@ export type {
   EntityReferenceBinding,
   EntityReferenceOptions,
 } from "./entity-references";
+
+export type {
+  CreateEntityInput,
+  EntitiesClient,
+  Entity,
+  EntityCapabilities,
+  EntityHandleAvailability,
+  EntityHandleInput,
+  EntityImage,
+  EntityList,
+  EntityRequestOptions,
+  ListEntitiesOptions,
+  UpdateEntityInput,
+} from "./entities";
