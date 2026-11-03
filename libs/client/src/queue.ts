@@ -1,10 +1,10 @@
-import {
-  CharacterReferenceOptions,
-  copyCharacterReferences,
-  rejectRawCharacterReferences,
-  requireCharacterReferenceSupport,
-} from "./character-references";
 import { RequiredConfig } from "./config";
+import {
+  copyEntityReferences,
+  EntityReferenceOptions,
+  rejectRawEntityReferences,
+  requireEntityReferenceSupport,
+} from "./entity-references";
 import { applyMetadata } from "./metadata";
 import { buildUrl, dispatchRequest } from "./request";
 import { resultResponseHandler } from "./response";
@@ -65,7 +65,7 @@ type QueueModeOptions =
       connectionMode?: StreamingConnectionMode;
     };
 
-type QueueCommonSubscribeOptions = CharacterReferenceOptions & {
+type QueueCommonSubscribeOptions = EntityReferenceOptions & {
   /**
    * The mode to use for subscribing to updates. It defaults to `polling`.
    * You can also use client-side streaming by setting it to `streaming`.
@@ -160,7 +160,7 @@ export type QueueSubscribeOptions = QueueCommonSubscribeOptions &
  * Options for submitting a request to the queue.
  */
 export type SubmitOptions<Input> = RunOptions<Input> &
-  CharacterReferenceOptions & {
+  EntityReferenceOptions & {
     /**
      * The URL to notify when the request reaches one of `webhookEvents`.
      *
@@ -343,17 +343,18 @@ export const createQueueClient = ({
       endpointId: string,
       options: SubmitOptions<Input>,
     ): Promise<InQueueQueueStatus> {
-      rejectRawCharacterReferences(options.input);
-      const bindings = copyCharacterReferences(options.references);
+      rejectRawEntityReferences(options.input);
+      const bindings = copyEntityReferences(options.references);
       if (bindings) {
         if (
           (options.method ?? "post").toLowerCase() !== "post" ||
           (options as { path?: string }).path
         )
-          throw new Error("Character references require a direct queue POST.");
-        await requireCharacterReferenceSupport(
+          throw new Error("Entity references require a direct queue POST.");
+        await requireEntityReferenceSupport(
           config,
           endpointId,
+          bindings,
           options.abortSignal,
         );
       }

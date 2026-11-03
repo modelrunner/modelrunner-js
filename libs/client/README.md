@@ -126,6 +126,37 @@ Both the old and the new secret are signed with for **24 hours** afterwards, so 
 
 The client library offers a plethora of features designed to simplify your journey with `modelrunner.ai`. Dive into the [official documentation](https://modelrunner.ai/docs) for a comprehensive guide.
 
-## Saved character references (unreleased)
+## Saved entity references
 
-Queue submission/subscription supports explicit, version-bound character selections. See the [character guide](https://modelrunner.ai/docs/guides/characters). The client checks enabled contract v1 before uploads, keeps bindings out of model input, and attempts each referenced submission POST once (including transport errors and HTTP redirects). Read-only polling retains its retries. After an uncertain outcome, inspect request history before submitting again. This option is not present in older published releases.
+Use `references` with `queue.submit` or `subscribe` to select saved characters,
+props, environments, styles or scenes. Model and account availability is staged;
+see the [entity guide](https://modelrunner.ai/docs/guides/entities).
+
+```ts
+const request = await modelrunner.queue.submit("your-team/image-editor", {
+  input: { prompt: "@lantern on a wooden table" },
+  references: [
+    {
+      type: "prop",
+      id: "11111111-1111-4111-8111-111111111111",
+      mention: "lantern",
+      version: 1,
+      file_ids: ["22222222-2222-4222-8222-222222222222"],
+    },
+  ],
+});
+```
+
+Replace the endpoint and IDs with your supported model and owned Entity/File
+IDs. A plain `@word` remains text. The SDK validates and copies selections,
+checks model-supported kinds and account eligibility **before uploading inputs**,
+then sends the referenced POST once, including after a transport failure or
+HTTP redirect. After an uncertain result, inspect history before submitting
+again. Polling keeps its ordinary retries.
+
+Character-only selections keep the existing character-v1 handshake and work
+with compatible older servers. `CharacterReferenceBinding` and
+`CharacterReferenceOptions` remain available. New kinds require generic
+`entityReferences` metadata plus authenticated owner eligibility; the SDK refuses
+an older or disabled server before uploads. Do not put the reserved binding key
+inside `input`, or send references through `run`/`stream`.

@@ -103,3 +103,9 @@ export type {
   CharacterReferenceBinding,
   CharacterReferenceOptions,
 } from "./character-references";
+
+export type {
+  EntityKind,
+  EntityReferenceBinding,
+  EntityReferenceOptions,
+} from "./entity-references";
