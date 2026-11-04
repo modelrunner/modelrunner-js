@@ -129,7 +129,8 @@ async function referenceModel(
   signal?: AbortSignal,
 ): Promise<ReferenceModel> {
   if (
-    !/^[a-zA-Z0-9_-]+\/[a-zA-Z0-9_-]+(?:\/[a-zA-Z0-9_-]+)*$/.test(endpoint) ||
+    !/^[a-zA-Z0-9_-]+\/[a-zA-Z0-9_.-]+(?:\/[a-zA-Z0-9_.-]+)*$/.test(endpoint) ||
+    endpoint.split("/").some((part) => part === "." || part === "..") ||
     MODULES.has(endpoint.split("/")[0].toLowerCase())
   )
     throw new Error("Entity references require a direct model endpoint.");
