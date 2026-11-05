@@ -69,6 +69,9 @@ export const modelrunner: SingletonModelrunnerClient =
       get queue() {
         return currentInstance.queue;
       },
+      get assetCollections() {
+        return currentInstance.assetCollections;
+      },
       get entities() {
         return currentInstance.entities;
       },
@@ -126,3 +129,19 @@ export type {
   ListEntitiesOptions,
   UpdateEntityInput,
 } from "./entities";
+
+export type {
+  AssetCollection,
+  AssetCollectionsClient,
+  AssetFile,
+  AssetFileList,
+  AssetGallery,
+  AssetGalleryItem,
+  AssetRuleCondition,
+  AssetRuleGroup,
+  AssetTag,
+  AssetTagInput,
+  CreateAssetCollectionInput,
+  ListAssetFilesOptions,
+  UpdateAssetCollectionInput,
+} from "./asset-collections";

@@ -1,4 +1,8 @@
 import {
+  createAssetCollectionsClient,
+  type AssetCollectionsClient,
+} from "./asset-collections";
+import {
   rejectNonQueueCharacterReferences,
   rejectRawCharacterReferences,
 } from "./character-references";
@@ -34,6 +38,8 @@ export interface ModelrunnerClient {
 
   /** Saved Entity CRUD and authenticated owner capabilities. */
   readonly entities: EntitiesClient;
+  /** Private media collections, unrelated to catalog collections. */
+  readonly assetCollections: AssetCollectionsClient;
 
   /**
    * The realtime client to interact with the realtime API
@@ -112,6 +118,7 @@ export function createModelrunnerClient(
 ): ModelrunnerClient {
   const config = createConfig(userConfig);
   const entities = createEntitiesClient({ config });
+  const assetCollections = createAssetCollectionsClient({ config });
   const storage = createStorageClient({ config });
   const queue = createQueueClient({ config, storage });
   const streaming = createStreamingClient({ config, storage });
@@ -120,6 +127,7 @@ export function createModelrunnerClient(
   return {
     queue,
     entities,
+    assetCollections,
     realtime,
     storage,
     streaming,

@@ -1,3 +1,11 @@
+import {
+  assetId,
+  assetQuery,
+  type AssetGallery,
+  type AssetTag,
+  type AssetTagInput,
+  type ListAssetFilesOptions,
+} from "./asset-collections";
 import { getRestApiUrl, RequiredConfig } from "./config";
 import type { EntityKind } from "./entity-references";
 import { dispatchRequest } from "./request";
@@ -15,6 +23,9 @@ export type Entity = {
   handle: string;
   description: string | null;
   coverFileId: string;
+  displayCover?: { fileId: string; url: string; mimeType: string } | null;
+  isFavorited?: boolean;
+  tags?: AssetTag[];
   version: number;
   /** ISO timestamps returned by the API. */
   createdAt: string;
@@ -26,16 +37,22 @@ export type CreateEntityInput = {
   handle: string;
   fileIds: readonly string[];
   coverFileId?: string;
+  /** Separate character display image; never an inference reference. */
+  displayCoverFileId?: string | null;
 } & (
   | { type: "character"; description: string }
   | { type: Exclude<EntityKind, "character">; description?: string | null }
 );
 export type UpdateEntityInput = {
   version: number;
+  /** Editable only for non-character entities. */
+  handle?: string;
   name?: string;
   description?: string | null;
   fileIds?: readonly string[];
   coverFileId?: string;
+  /** Separate character display image; never an inference reference. */
+  displayCoverFileId?: string | null;
 };
 export type EntityCapabilities = {
   contractVersion: 1;
@@ -46,6 +63,8 @@ export type EntityCapabilities = {
 export type ListEntitiesOptions = {
   q?: string;
   type?: EntityKind;
+  favoritesOnly?: boolean;
+  tagId?: string;
   page?: number;
   limit?: number;
 };
@@ -85,6 +104,36 @@ export interface EntitiesClient {
     options?: EntityRequestOptions,
   ): Promise<EntityHandleAvailability>;
   capabilities(options?: EntityRequestOptions): Promise<EntityCapabilities>;
+  listAssets(
+    id: string,
+    query?: ListAssetFilesOptions,
+    options?: EntityRequestOptions,
+  ): Promise<AssetGallery>;
+  linkAssets(
+    id: string,
+    fileIds: readonly string[],
+    options?: EntityRequestOptions,
+  ): Promise<void>;
+  unlinkAssets(
+    id: string,
+    fileIds: readonly string[],
+    options?: EntityRequestOptions,
+  ): Promise<void>;
+  setFavorite(
+    id: string,
+    favorite: boolean,
+    options?: EntityRequestOptions,
+  ): Promise<void>;
+  assignTag(
+    id: string,
+    tag: AssetTagInput,
+    options?: EntityRequestOptions,
+  ): Promise<AssetTag>;
+  removeTag(
+    id: string,
+    tagId: string,
+    options?: EntityRequestOptions,
+  ): Promise<void>;
 }
 
 function entityPath(id: string): string {
@@ -119,9 +168,53 @@ export function createEntitiesClient({
       },
     });
   return {
+    listAssets: (id, query, options) =>
+      send(
+        "get",
+        `${entityPath(id)}/assets?${assetQuery(query)}`,
+        undefined,
+        options,
+      ),
+    linkAssets: (id, fileIds, options) =>
+      send(
+        "put",
+        `${entityPath(id)}/assets`,
+        { fileIds: [...fileIds] },
+        options,
+      ),
+    unlinkAssets: (id, fileIds, options) =>
+      send(
+        "delete",
+        `${entityPath(id)}/assets`,
+        { fileIds: [...fileIds] },
+        options,
+      ),
+    setFavorite: (id, favorite, options) =>
+      send(
+        favorite ? "put" : "delete",
+        `${entityPath(id)}/favorite`,
+        undefined,
+        options,
+      ),
+    assignTag: (id, tag, options) =>
+      send("post", `${entityPath(id)}/tags`, tag, options),
+    removeTag: (id, tagId, options) =>
+      send(
+        "delete",
+        `${entityPath(id)}/tags/${assetId(tagId)}`,
+        undefined,
+        options,
+      ),
     list(query = {}, options) {
       const params = new URLSearchParams();
-      for (const key of ["q", "type", "page", "limit"] as const)
+      for (const key of [
+        "q",
+        "type",
+        "page",
+        "limit",
+        "favoritesOnly",
+        "tagId",
+      ] as const)
         if (query[key] !== undefined) params.set(key, String(query[key]));
       return send("get", params.size ? `?${params}` : "", undefined, options);
     },
