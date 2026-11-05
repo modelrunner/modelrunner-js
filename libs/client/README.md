@@ -167,11 +167,15 @@ inside `input`, or send references through `run`/`stream`.
 const { items, counts } = await modelrunner.entities.list({ type: "prop" });
 const { handle, available } = await modelrunner.entities.checkHandle({ name: "Brass lantern" });
 const entity = await modelrunner.entities.create({
-  type: "prop", name: "Brass lantern", handle,
-  fileIds: [ownedFileId], description: "Brass body and a red leather strap",
+  type: "prop",
+  name: "Brass lantern",
+  handle,
+  fileIds: [ownedFileId],
+  description: "Brass body and a red leather strap",
 });
 const updated = await modelrunner.entities.update(entity.id, {
-  version: entity.version, description: "Brass body and a blue leather strap",
+  version: entity.version,
+  description: "Brass body and a blue leather strap",
 });
 // await modelrunner.entities.get(entity.id);
 // await modelrunner.entities.delete(entity.id);
@@ -185,3 +189,33 @@ are preserved; a conflicting version returns 409. Check availability before crea
 while still handling a concurrent conflict. Availability does not reserve a handle.
 
 Use `entities.capabilities()` for account admission.
+
+### Private asset organization (1.6.0+)
+
+```javascript
+const collection = await modelrunner.assetCollections.create({
+  operationId: crypto.randomUUID(), // Retain for reconciliation of this create.
+  kind: "manual",
+  name: "Campaign references",
+});
+await modelrunner.assetCollections.addFiles(collection.id, [ownedFileId]);
+const media = await modelrunner.assetCollections.listFiles(collection.id);
+await modelrunner.entities.setFavorite(entity.id, true);
+await modelrunner.entities.assignTag(entity.id, { name: "Campaign" });
+await modelrunner.entities.linkAssets(entity.id, [ownedFileId]);
+const gallery = await modelrunner.entities.listAssets(entity.id);
+```
+
+Collections are owner-private and distinct from catalog collections. Updates and
+deletes require the current version. Nested folder moves reject cycles. Smart
+collections evaluate bounded All/Any rules on read and reject manual membership.
+An unavailable rule target invalidates the whole collection. Exact create retries
+with the same operationId reconcile the same result; writes never retry
+implicitly or follow redirects. Deleting a collection keeps files and promotes
+child folders. Gallery items distinguish generated from manuallyLinked; unlink
+never removes recorded generation usage or changes defining references.
+
+Non-character identifiers can be edited with entities.update; character handles
+and kinds remain fixed. Optional displayCoverFileId selects a separate character
+cover without changing the legacy member coverFileId contract. Prefer
+entity.displayCover for presentation, and entity.files for inference references.
